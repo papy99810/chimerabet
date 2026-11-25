@@ -15,7 +15,7 @@ finish() {
 }
 
 if [ ! -d "$SRC" ]; then
-  echo "素材フォルダ「$SRC」が見つかりません（chimerabet.html と同じ場所に置いてください）"
+  echo "素材フォルダ「$SRC」が見つかりません（index.html と同じ場所に置いてください）"
   finish 1
 fi
 
@@ -37,5 +37,5 @@ echo "== フォントの絵・素材の一覧 =="
 python3 tools/build_fonts.py "$SRC" . || { echo "フォントの書き出しに失敗しました"; finish 1; }
 
 echo
-echo "完了しました。ブラウザで chimerabet.html を再読み込みしてください。"
+echo "完了しました。ブラウザで index.html を再読み込みしてください。"
 finish 0
