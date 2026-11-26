@@ -21,8 +21,8 @@ fi
 
 echo "素材フォルダ: $SRC"
 echo
-# 作り直すので、前回書き出した分は消す（assets 内のほかのフォルダには触らない）
-rm -rf assets/turntable assets/animation assets/glyphs
+# フォントの絵は毎回作り直す（動画は、元の動画が変わったものだけ書き出し直す）
+rm -rf assets/glyphs
 
 echo "== 動画 =="
 BIN="${TMPDIR:-/tmp}/chimerabet_build_videos"

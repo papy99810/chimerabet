@@ -12,12 +12,10 @@
    ===================================================================== */
 
 window.CHIMERABET = {
-  // ロゴ画像（null の間はフォントの絵で文字ロゴを表示。ホームでクリックすると書き換えられる）
+  // ロゴ画像（null の間は、下の logoFont の絵で「CHIMERABET」を並べて表示）
   logo: null, // 'assets/logo.png'
 
-  // ロゴの最初のフォント（One / Two / Three / Four / Five / silhouette）
-  // ロゴの編集中に出るボタンで切り替えて試せます（選んだものはそのブラウザに保存）
-  // ほかのフォントファイルを画面にドラッグ＆ドロップすると、その場で試せます
+  // ロゴに使うフォント（One / Two / Three / Four / Five / silhouette）
   logoFont: 'Three',
 
   // どのフォントの絵を使うか

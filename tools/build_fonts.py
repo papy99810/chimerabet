@@ -7,7 +7,7 @@
 
 作るもの
   assets/glyphs/<フォント名>/A.svg … 各文字の絵（Chrome はこの形式のフォントを表示できないため画像にする）
-  fonts/chimerabet-metrics.otf     … 字送りだけのフォント（ロゴ編集用。絵は画像で重ねる）
+  fonts/chimerabet-metrics.otf     … 字送りだけのフォント（ロゴ用。絵は画像で重ねる）
   js/assets.js                     … 上の素材と assets/ 内の動画の一覧（サイトが読み込む）
 """
 import gzip

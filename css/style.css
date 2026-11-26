@@ -64,58 +64,9 @@ img, video { display: block; -webkit-user-drag: none; user-select: none; -webkit
 }
 .logo .g::selection { color: transparent; background-color: rgba(0, 0, 0, .1); }
 .logo[data-font="glyph"] .t { font-size: .5em; line-height: 1; }
-.logo[data-font="glyph"] .sp { letter-spacing: .12em; }
 html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り用フォントを読むまで隠す（一瞬ずれて見えないように） */
 .logo[data-font="glyph"] { transition: opacity .2s; }
-.logo-edit {
-  min-width: 2em;
-  margin: -6px -10px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  outline: 2px dashed transparent;
-  cursor: text;
-  caret-color: #333;
-  transition: outline-color .2s, background .2s;
-}
-.logo-edit:hover { outline-color: #ddd; }
-.logo-edit:focus { outline-color: #aaa; }
-.is-dragging-file .logo-edit { outline-color: #5BB32F; background: #f3faee; }
-
-/* 編集中だけ出る、ロゴのフォント切り替え */
-.logo-wrap { position: relative; min-width: 0; }
-.logo-fonts {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: -10px;
-  z-index: 5;
-  display: none;
-  gap: 4px;
-  padding: 6px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, .14);
-  white-space: nowrap;
-}
-.logo-wrap:focus-within .logo-fonts { display: flex; }
-.logo-font {
-  display: grid;
-  justify-items: center;
-  gap: 2px;
-  width: 64px;
-  padding: 6px 2px 5px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: #888;
-  font: 600 10px/1 var(--font-ui);
-  letter-spacing: .02em;
-  cursor: pointer;
-}
-.logo-font:hover { background: #f4f4f4; color: #333; }
-.logo-font[aria-pressed="true"] { background: #222; color: #fff; }
-.logo-font-img { width: 40px; height: 40px; object-fit: contain; pointer-events: none; }
-.logo-font-aa { display: grid; place-items: center; width: 40px; height: 40px; font: 400 24px/1 var(--font-logo); }
-.logo-font-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.logo:focus-visible { outline: 3px solid #333; outline-offset: 6px; border-radius: 6px; }
 
 .grid {
   --cols: 7;
@@ -186,9 +137,11 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
    ===================================================================== */
 .view { position: absolute; inset: 0; }
 .view-still { padding: 8%; } /* app.js の STILL_PAD と合わせる */
+
 .view-silhouette { padding: 0; }
 
-/* --- Animation：枠の中だけで表示し、両端でフェード --- */
+/* --- Animation --- */
+/* 動画がない文字の歩くアニメーション：枠の中だけで表示し、両端でフェード */
 .anim-frame {
   position: absolute;
   inset: 0;
@@ -207,19 +160,14 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
 }
 .key-black { filter: url(#key-black); }
 .crawl { width: auto; height: 96%; aspect-ratio: 1; animation: crawl .62s ease-in-out infinite alternate; transform-origin: 50% 80%; }
-/* アニメーション動画：動画の左右の端をフェードさせて、枠から出入りして見えるように */
-.view-animation.has-video { display: flex; align-items: center; justify-content: center; }
-.anim-video {
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
-          mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
-}
 @keyframes crawl {
   from { transform: translateY(2%) rotate(-4deg) scaleY(.97); }
   to   { transform: translateY(-5%) rotate(3deg) scaleY(1.02); }
+}
+/* アニメーション動画：左右の端をフェードさせて、枠から出入りして見えるように */
+.has-video .media {
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
 }
 
 /* --- Turntable --- */
@@ -244,7 +192,7 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
 /* 回転動画（背景は白。万一わずかに白からずれても目立たないよう乗算で重ねる）
    一覧用はフォントの絵と足元・大きさがそろうよう、マスより少し大きく置く */
 .tt-grid { inset: 1.5%; }
-.tt-grid .media, .tt-detail .media { mix-blend-mode: multiply; }
+.tt-grid .media, .tt-detail .media, .has-video .media { mix-blend-mode: multiply; }
 
 /* =====================================================================
    個別ページ（ホームの上に重ねるポップアップ）
@@ -303,6 +251,7 @@ html.popup-open { overflow: hidden; }
 .close-btn svg { width: 22px; height: 22px; }
 
 .detail-head {
+  grid-row: 1;
   position: relative;
   z-index: 2;
   /* 左は × と重ならないよう最低 64px */
@@ -319,12 +268,16 @@ html.popup-open { overflow: hidden; }
   color: var(--title, var(--c));
 }
 
+/* 表示枠：カードのちょうど中央（左右の矢印と同じ高さ）に置く 16:9 の枠
+   アニメーション・ターンテーブルの動画（どちらも 1920×1080）は、この枠いっぱいに表示する */
 .stage {
-  position: relative;
-  justify-self: center;
-  align-self: center;
-  width: min(74cqw, 1010px);
-  height: min(58cqh, 550px);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  z-index: 1;
+  width: min(78cqw, 1040px, 64cqh * 16 / 9);
+  aspect-ratio: 16 / 9;
   animation: appear .45s ease both;
 }
 @keyframes appear { from { opacity: 0; transform: scale(.96); } }
@@ -358,6 +311,7 @@ html.popup-open { overflow: hidden; }
 .nav-next:hover { transform: translate(4px, -50%); }
 
 .detail-foot {
+  grid-row: 3;
   position: relative;
   z-index: 2;
   display: flex;

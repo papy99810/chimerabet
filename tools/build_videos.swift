@@ -3,7 +3,7 @@
 //   swift tools/build_videos.swift <素材フォルダ> <出力先 assets フォルダ> [文字…]
 //
 //   ・ファイル名に「ターンテーブル」を含む動画 … ターンテーブル（先頭の英字 = 文字）
-//       assets/turntable/A.mp4       個別ページ用（キャラクターの周りを切り抜き。ドラッグで戻しやすい形式）
+//       assets/turntable/A.mp4       個別ページ用（アニメーションと同じ 1920×1080 のまま。ドラッグで戻しやすい形式）
 //       assets/turntable/grid/A.mp4  ホーム一覧用（小さい正方形）
 //       元の動画は「ゆっくり始まってゆっくり止まる」1回転なので、一定の速さで回り続けるよう並べ直す
 //   ・それ以外で先頭が英字の動画 … アニメーション
@@ -29,8 +29,8 @@ struct Out {
   let quality: Double // 0〜1（画質で指定すると白い背景が真っ白のまま保たれやすい）
 }
 
-// ターンテーブル：全文字を重ねたときのキャラクターの範囲 ≒ x 432〜1492, y 272〜1012（1920×1080）
-let TT_DETAIL = Out(crop: CGRect(x: 384, y: 226, width: 1152, height: 832), width: 1152, height: 832, keyInterval: 4, quality: 0.8)
+// 個別ページ用：アニメーションの動画と外枠がそろうよう、切り抜かずに 1920×1080 のまま
+let TT_DETAIL = Out(crop: CGRect(x: 0, y: 0, width: 1920, height: 1080), width: 1920, height: 1080, keyInterval: 4, quality: 0.8)
 // 一覧用：一覧の静止画（フォントの絵）と足元・大きさがそろう位置
 let TT_GRID = Out(crop: CGRect(x: 416, y: 129, width: 1088, height: 1088), width: 288, height: 288, keyInterval: 30, quality: 0.72)
 let ANIM = Out(crop: CGRect(x: 0, y: 0, width: 1920, height: 1080), width: 1920, height: 1080, keyInterval: 24, quality: 0.78)
@@ -141,6 +141,16 @@ final class Writer {
   }
 }
 
+
+// 元の動画もこのツールも前回から変わっていなければ、書き出しを省く
+// （書き出し直すと中身が同じでも毎回ファイルが変わり、GitHub に毎回まるごと上がってしまうため）
+func modified(_ url: URL) -> Date? { (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date }
+let TOOL_DATE = modified(URL(fileURLWithPath: #filePath)) ?? Date()
+func upToDate(_ src: URL, _ outs: [URL]) -> Bool {
+  let need = max(modified(src) ?? Date(), TOOL_DATE)
+  return outs.allSatisfy { (modified($0) ?? .distantPast) > need }
+}
+
 // turntable: true のとき、元のコマ f の角度 = 360 × SOURCE_EASE(f / 最後のコマ番号) として
 // 一定の速さで回るタイミングに置き直す（最後のコマ = 360° = 最初のコマと同じなので使わない）
 func process(_ src: URL, outs: [(URL, Out)], turntable: Bool) {
@@ -156,6 +166,11 @@ func process(_ src: URL, outs: [(URL, Out)], turntable: Bool) {
   reader.add(ro)
   reader.startReading()
 
+  let skip = upToDate(src, outs.map { $0.0 })
+  if skip {
+    print("  \(src.lastPathComponent) → 変更なし（書き出しは省略）")
+    return
+  }
   let writers = outs.map { Writer($0.0, $0.1, fps: turntable ? 60 : fps) }
   var keyBlack: Bool? = turntable ? false : nil
   var f = -1 // 元のコマ番号
@@ -218,6 +233,18 @@ for L in tt.keys.sorted() {
       (outRoot.appendingPathComponent("turntable/\(L).mp4"), TT_DETAIL),
       (outRoot.appendingPathComponent("turntable/grid/\(L).mp4"), TT_GRID),
     ], turntable: true)
+  }
+}
+// 素材フォルダから消えた文字の動画は消す（全部の文字を書き出すときだけ）
+if only.isEmpty {
+  for (dir, have) in [("turntable", tt), ("turntable/grid", tt), ("animation", anim)] {
+    let d = outRoot.appendingPathComponent(dir)
+    for f in (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? [] where f.hasSuffix(".mp4") {
+      if have[String(f.dropLast(4))] == nil {
+        try? FileManager.default.removeItem(at: d.appendingPathComponent(f))
+        print("  素材にない \(dir)/\(f) を削除")
+      }
+    }
   }
 }
 print("アニメーション \(anim.count)本")

@@ -98,6 +98,17 @@
     return glyphCache.get(key);
   }
 
+  // 絵のまん中が画像のまん中に来るよう、表示範囲（viewBox）をずらした画像（大きさはそのまま）
+  function centeredGlyphURL(f, L, color) {
+    const g = f && f.glyphs && f.glyphs[L];
+    const svgs = f && (f.svg || AS.mono[f.id]);
+    if (!g || !svgs || !svgs[L]) return glyphURL(f, L, color);
+    const cx = Math.round((g.x0 + g.x1) / 2);
+    const cy = Math.round((g.y0 + g.y1) / 2);
+    const svg = svgs[L].replace('viewBox="0 0 1000 1000"', `viewBox="${cx - 500} ${cy - 500} 1000 1000"`);
+    return svgURL(f.mono ? svg.replace('__COLOR__', color || '#000') : svg);
+  }
+
   const G = CFG.glyphs || {};
   const ILLUST_FONT = findFont(G.illust || 'Two');
   const SIL_FONT = findFont(G.silhouette || 'silhouette');
@@ -115,6 +126,8 @@
       letter, index, color, ph,
       illust: a.illust || glyphURL(ILLUST_FONT, letter) || ph.illust,
       silhouette: a.silhouette || silGlyph || ph.silhouette,
+      // 個別ページ用：絵のまん中を動画の枠のまん中にそろえたシルエット
+      silhouetteCentered: a.silhouette || (silGlyph && centeredGlyphURL(SIL_FONT, letter, color)) || ph.silhouette,
       // 表示切り替えボタン用（白いシルエット）
       silhouetteIcon: silGlyph ? glyphURL(SIL_FONT, letter, '#fff') : null,
       animation: anim.src || null,
@@ -163,8 +176,10 @@
      表示パーツ。どれも { el, start(), stop() } を返す
      ===================================================================== */
 
+  // 個別ページは、どの表示も同じ 16:9 の表示枠（.stage）いっぱいに置く。
+  // アニメーションとターンテーブルの動画はどちらも 1920×1080 なので、外枠がぴったり重なる
   function viewSilhouette(c) {
-    return { el: h('div', { class: 'view view-silhouette' }, img(c.silhouette, 'media')), start: noop, stop: noop };
+    return { el: h('div', { class: 'view view-silhouette' }, img(c.silhouetteCentered, 'media')), start: noop, stop: noop };
   }
 
   // 一覧用：動かない絵（シルエット表示ならシルエット、それ以外は斜め向きのイラスト）
@@ -172,7 +187,6 @@
     return h('div', { class: 'view view-still' }, img(mode === 'silhouette' ? c.silhouette : c.illust, 'media'));
   }
 
-  // 動画がない文字：枠の右外から歩いてきて左外へ抜ける（枠の両端はマスクでフェード）
   const WALK = [
     { transform: 'translateX(68%)', opacity: 0 },
     { transform: 'translateX(40%)', opacity: 1, offset: 0.14 },
@@ -183,7 +197,6 @@
   function viewAnimation(c) {
     if (c.animation) {
       const vid = makeVideo(c.animation, true);
-      vid.classList.add('anim-video');
       if (c.animationKeyBlack) vid.classList.add('key-black');
       return {
         el: h('div', { class: 'view view-animation has-video' }, vid),
@@ -192,6 +205,7 @@
         stop() { releaseVideo(vid); },
       };
     }
+    // 動画がない文字：枠の右外から歩いてきて左外へ抜ける（枠の両端はマスクでフェード）
     const mover = h('div', { class: 'anim-mover' }, h('div', { class: 'crawl' }, img(c.illust, 'media')));
     let anim = null;
     return {
@@ -445,25 +459,12 @@
   }
 
   /* =====================================================================
-     ロゴ（ホームではクリックで文字を編集できる）
-     文字はフォントの絵（画像）で表示。編集中はフォントを切り替えられる
+     ロゴ（クリックするとホームへ）
+     文字はフォントの絵（画像）で表示。どのフォントを使うかは data.js の logoFont
      ===================================================================== */
-  const LOGO_DEFAULT = 'CHIMERABET';
-  const LOGO_STORE = 'chimerabet.logoText';
-  const LOGO_FONT_STORE = 'chimerabet.logoFont';
+  const LOGO_TEXT = 'CHIMERABET';
   const LOGO_GAP = 30; // 絵と絵の間（1000 = 文字の大きさ）
-  const store = {
-    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 保存できない環境では何もしない */ } },
-  };
-  let logoText = store.get(LOGO_STORE) || LOGO_DEFAULT;
-
-  const PLAIN = { id: 'plain', label: '標準', name: '標準の文字（絵を使わない）', plain: true };
-  let dropFont = null; // 画面にドロップして試しているフォント（再読み込みで消える）
-  const logoFonts = () => FONTS.concat(PLAIN, dropFont ? [dropFont] : []);
-  const defaultLogoFont = () => findFont(CFG.logoFont || 'Three') || PLAIN;
-  let logoFontId = store.get(LOGO_FONT_STORE);
-  const currentLogoFont = () => logoFonts().find((f) => f.id === logoFontId) || defaultLogoFont();
+  const LOGO_FONT = findFont(CFG.logoFont || 'Three');
 
   // 字送りだけのフォント（絵は背景画像で重ねる）
   // 文字の箱の上端から並ぶ線（ベースライン）までの距離はブラウザによって違うので、読み込み後に測る
@@ -477,31 +478,29 @@
     box.remove();
     return a > 0.3 && a < 2 ? a : ascentEm;
   }
-  if (AS.metrics) {
+  if (AS.metrics && LOGO_FONT) {
     new FontFace('ChimerabetMetrics', 'url("fonts/chimerabet-metrics.otf")').load()
-      .then((f) => { document.fonts.add(f); ascentEm = measureAscent(); repaintLogos(); })
+      .then((f) => {
+        document.fonts.add(f);
+        ascentEm = measureAscent();
+        document.querySelectorAll('.logo-text').forEach(paintLogo);
+      })
       .catch(() => console.warn('fonts/chimerabet-metrics.otf を読み込めませんでした'))
       .finally(() => root.classList.add('metrics-ready'));
   } else {
     root.classList.add('metrics-ready');
   }
 
-  // 1文字ずつ描き直す。フォントにある英字は絵、それ以外はふつうの文字
-  function paintLogo(el, text) {
-    const f = currentLogoFont();
-    const glyphMode = !f.plain && !!f.glyphs && !!AS.metrics;
+  // 1文字ずつ並べる。フォントにある英字は絵、それ以外はふつうの文字
+  function paintLogo(el) {
+    const f = LOGO_FONT;
+    const glyphMode = !!f && !!AS.metrics;
     el.dataset.font = glyphMode ? 'glyph' : 'plain';
-    el.style.fontFamily = f.family ? `"${f.family}", var(--font-logo)` : '';
-    const em = glyphMode ? AS.metrics.em : 1000;
-    el.replaceChildren(...Array.from(text, (ch, i) => {
-      const L = ch.toUpperCase();
-      const g = glyphMode && f.glyphs[L];
-      if (!g) {
-        if (glyphMode && ch === ' ') return h('span', { class: 'sp' }, ch);
-        return h('span', { class: 't', style: `color:${LOGO_COLORS[i % LOGO_COLORS.length]}` }, ch);
-      }
-      const url = glyphURL(f, L, BY[L].color);
-      const adv = (AS.metrics.adv[L] || em) / em;
+    el.replaceChildren(...Array.from(LOGO_TEXT, (ch, i) => {
+      const g = glyphMode && f.glyphs[ch];
+      if (!g) return h('span', { class: 't', style: `color:${LOGO_COLORS[i % LOGO_COLORS.length]}` }, ch);
+      const em = AS.metrics.em;
+      const adv = (AS.metrics.adv[ch] || em) / em;
       // 絵の左端・右端に合わせて詰める（フォントの字送りは全部同じ幅なので）
       const left = (LOGO_GAP / 2 - g.x0) / em;
       const width = (g.x1 - g.x0 + LOGO_GAP) / em;
@@ -509,117 +508,15 @@
       const top = ascentEm - f.baseline / em;
       return h('span', {
         class: 'g',
-        style: `background-image:url("${url}");margin-left:${left.toFixed(3)}em;letter-spacing:${(width - left - adv).toFixed(3)}em;background-position:0 ${top.toFixed(3)}em`,
+        style: `background-image:url("${glyphURL(f, ch, BY[ch].color)}");margin-left:${left.toFixed(3)}em;letter-spacing:${(width - left - adv).toFixed(3)}em;background-position:0 ${top.toFixed(3)}em`,
       }, ch);
     }));
   }
-  function repaintLogos() {
-    document.querySelectorAll('.logo-text').forEach((el) => {
-      const pos = document.activeElement === el ? caretOffset(el) : null;
-      paintLogo(el, document.activeElement === el ? el.textContent : logoText);
-      if (pos != null) placeCaret(el, pos);
-    });
-    document.querySelectorAll('.logo-fonts').forEach((n) => n.dispatchEvent(new Event('redraw')));
-  }
-  function setLogoFont(id) {
-    logoFontId = id;
-    if (id !== 'drop') store.set(LOGO_FONT_STORE, id);
-    repaintLogos();
-  }
 
-  // 文字を描き直してもカーソル位置がずれないように
-  function caretOffset(el) {
-    const sel = window.getSelection();
-    if (!sel.rangeCount || !el.contains(sel.focusNode)) return null;
-    const r = document.createRange();
-    r.setStart(el, 0);
-    r.setEnd(sel.focusNode, sel.focusOffset);
-    return r.toString().length;
-  }
-  function placeCaret(el, offset) {
-    const r = document.createRange();
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    let left = offset;
-    let placed = false;
-    let n;
-    while (offset != null && (n = walker.nextNode())) {
-      if (left <= n.length) { r.setStart(n, left); r.collapse(true); placed = true; break; }
-      left -= n.length;
-    }
-    if (!placed) { r.selectNodeContents(el); r.collapse(false); }
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(r);
-  }
-
-  // 編集中に出る、フォントの切り替えボタン
-  function logoFontPicker() {
-    const nav = h('div', { class: 'logo-fonts', role: 'group', 'aria-label': 'ロゴのフォント' });
-    const draw = () => {
-      const cur = currentLogoFont();
-      nav.replaceChildren(...logoFonts().map((f) => h('button', {
-        type: 'button',
-        class: 'logo-font',
-        title: f.name || f.label,
-        'aria-pressed': f.id === cur.id ? 'true' : 'false',
-        onpointerdown: (e) => e.preventDefault(), // 押しても編集中のカーソルが消えないように
-        onclick: () => setLogoFont(f.id),
-      }, f.plain
-        ? h('span', { class: 'logo-font-aa', style: f.family ? `font-family:"${f.family}"` : null }, 'Aa')
-        : img(glyphURL(f, 'A', BY.A.color) || '', 'logo-font-img'),
-      h('span', { class: 'logo-font-name' }, f.label))));
-    };
-    nav.addEventListener('redraw', draw);
-    draw();
-    return nav;
-  }
-
-  function editableLogo() {
-    if (CFG.logo) return h('div', { class: 'logo' }, h('img', { src: CFG.logo, alt: 'CHIMERABET' }));
-    const el = h('div', {
-      class: 'logo logo-text logo-edit',
-      contenteditable: 'true',
-      role: 'textbox',
-      spellcheck: 'false',
-      autocapitalize: 'off',
-      'aria-label': 'ロゴの文字（クリックして編集できます）',
-      title: 'クリックで文字を編集（Enterで確定 / Escで取り消し）\nフォントファイルを画面にドロップすると、そのフォントで試せます',
-    });
-    paintLogo(el, logoText);
-    let before = logoText;
-    const save = (text) => { logoText = text; store.set(LOGO_STORE, text); };
-    const repaint = () => {
-      const pos = caretOffset(el);
-      paintLogo(el, el.textContent.replace(/[\r\n]/g, ''));
-      placeCaret(el, pos);
-      const t = el.textContent.trim();
-      if (t) save(t); // 入力するたびに保存（ページを移っても残る）
-    };
-    el.addEventListener('focus', () => { before = el.textContent; });
-    el.addEventListener('input', (e) => { if (!e.isComposing) repaint(); }); // 日本語の変換中は描き直さない
-    el.addEventListener('compositionend', repaint);
-    el.addEventListener('keydown', (e) => {
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
-      else if (e.key === 'Escape') { paintLogo(el, before); save(before.trim() || LOGO_DEFAULT); el.blur(); }
-    });
-    el.addEventListener('paste', (e) => {
-      e.preventDefault();
-      const t = (e.clipboardData || window.clipboardData).getData('text').replace(/[\r\n]+/g, ' ');
-      document.execCommand('insertText', false, t);
-    });
-    el.addEventListener('blur', () => {
-      save(el.textContent.trim() || LOGO_DEFAULT); // 全部消したら「CHIMERABET」に戻す
-      paintLogo(el, logoText);
-    });
-    return h('div', { class: 'logo-wrap' }, el, logoFontPicker());
-  }
-
-  // about ページなどで使う、ホームへのリンクになったロゴ
   function logoLink(mode) {
-    const a = h('a', { class: 'logo logo-text', href: `#/grid/${mode}`, 'aria-label': 'ホームへ' });
+    const a = h('a', { class: 'logo logo-text', href: `#/grid/${mode}`, 'aria-label': 'CHIMERABET（ホームへ）' });
     if (CFG.logo) a.append(h('img', { src: CFG.logo, alt: 'CHIMERABET' }));
-    else paintLogo(a, logoText);
+    else paintLogo(a);
     return a;
   }
 
@@ -629,122 +526,6 @@
       h('nav', { class: 'site-nav', 'aria-label': 'サイト内リンク' },
         h('a', { href: '#/about', 'aria-current': current === 'about' ? 'page' : null }, 'about')));
   }
-
-  /* ---------- フォントファイルをドロップしてロゴで試す ----------
-     SVG カラーフォント（今回の otf と同じ形式）は、絵を取り出して表示する
-     ふつうのフォントは、そのまま文字のフォントとして使う */
-  const FONT_FILE = /\.(otf|ttf|woff2?)$/i;
-  let triedFace = null;
-
-  async function readSvgFont(buf) {
-    const dv = new DataView(buf);
-    const tabs = {};
-    for (let i = 0, n = dv.getUint16(4); i < n; i++) {
-      const o = 12 + 16 * i;
-      tabs[String.fromCharCode(dv.getUint8(o), dv.getUint8(o + 1), dv.getUint8(o + 2), dv.getUint8(o + 3))] = dv.getUint32(o + 8);
-    }
-    if (tabs['SVG '] == null || tabs.cmap == null) return null;
-    // 文字 → 字形番号（cmap format 4）
-    const c2g = {};
-    const cm = tabs.cmap;
-    for (let i = 0, nt = dv.getUint16(cm + 2); i < nt; i++) {
-      const so = cm + dv.getUint32(cm + 4 + 8 * i + 4);
-      if (dv.getUint16(so) !== 4) continue;
-      const seg = dv.getUint16(so + 6) / 2;
-      const ends = so + 14, starts = ends + 2 * seg + 2, deltas = starts + 2 * seg, rofs = deltas + 2 * seg;
-      for (let k = 0; k < seg; k++) {
-        const s = dv.getUint16(starts + 2 * k), e = dv.getUint16(ends + 2 * k);
-        const d = dv.getInt16(deltas + 2 * k), r = dv.getUint16(rofs + 2 * k);
-        for (const L of LETTERS) {
-          const c = L.charCodeAt(0);
-          if (c < s || c > e || c2g[L] != null) continue;
-          let g = r ? dv.getUint16(rofs + 2 * k + r + 2 * (c - s)) : c;
-          if (g) g = (g + d) & 0xffff;
-          c2g[L] = g;
-        }
-      }
-    }
-    // SVG の絵
-    const so = tabs['SVG '];
-    const list = so + dv.getUint32(so + 2);
-    const docs = {};
-    for (let i = 0, ne = dv.getUint16(list); i < ne; i++) {
-      const e = list + 2 + 12 * i;
-      const sg = dv.getUint16(e), eg = dv.getUint16(e + 2);
-      let bytes = new Uint8Array(buf, list + dv.getUint32(e + 4), dv.getUint32(e + 8));
-      if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-        bytes = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
-      }
-      const text = new TextDecoder().decode(bytes);
-      for (let g = sg; g <= eg; g++) docs[g] = text;
-    }
-    const glyphs = {};
-    const svg = {};
-    const colors = new Set();
-    for (const L of LETTERS) {
-      const doc = docs[c2g[L]];
-      if (!doc) continue;
-      const s = doc.replace(/<\?xml[^>]*\?>/, '').trim()
-        .replace(/<svg\b[^>]*>/, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">');
-      // 絵の範囲を測る
-      const box = h('div', { style: 'position:absolute;left:-99999px;top:0;width:1000px;height:1000px;visibility:hidden', html: s });
-      document.body.append(box);
-      const bb = box.firstElementChild.getBBox();
-      box.remove();
-      glyphs[L] = { x0: bb.x, x1: bb.x + bb.width, y0: bb.y, y1: bb.y + bb.height };
-      svg[L] = s;
-      (s.match(/(?:fill|stroke)\s*[:=]\s*"?\s*(#[0-9a-f]{3,6})/gi) || []).forEach((m) => colors.add(m.slice(m.indexOf('#'))));
-    }
-    if (!Object.keys(glyphs).length) return null;
-    // 黒一色のフォントは、シルエットと同じく文字ごとの色で塗る
-    const dark = (c) => { const x = c.length === 4 ? c.replace(/\w/g, '$&$&') : c; return [1, 3, 5].reduce((s, i) => s + parseInt(x.substr(i, 2), 16), 0) < 120; };
-    const mono = [...colors].every(dark);
-    if (mono) {
-      for (const L in svg) {
-        svg[L] = svg[L].replace(/#(?:000|000000|040000|231815)\b/gi, 'currentColor')
-          .replace('viewBox="0 0 1000 1000">', 'viewBox="0 0 1000 1000" fill="currentColor" color="__COLOR__">');
-      }
-    }
-    const bottoms = Object.values(glyphs).map((g) => g.y1).sort((a, b) => a - b);
-    return { glyphs, svg, mono, baseline: bottoms[bottoms.length >> 1] };
-  }
-
-  async function tryFontFile(file) {
-    const buf = await file.arrayBuffer();
-    const name = file.name.replace(/\.[^.]+$/, '');
-    let parsed = null;
-    try { parsed = await readSvgFont(buf); } catch (e) { parsed = null; }
-    if (parsed) {
-      dropFont = Object.assign({ id: 'drop', label: 'ドロップ', name: `${file.name}（試し中）` }, parsed);
-    } else {
-      const face = new FontFace('ChimerabetLogoTry', buf);
-      await face.load();
-      if (triedFace) document.fonts.delete(triedFace);
-      document.fonts.add(face);
-      triedFace = face;
-      dropFont = { id: 'drop', label: 'ドロップ', name: `${file.name}（試し中）`, plain: true, family: 'ChimerabetLogoTry' };
-    }
-    glyphCache.forEach((v, k) => { if (k.startsWith('drop/')) glyphCache.delete(k); });
-    console.info('ロゴのフォントを試しています:', name);
-    setLogoFont('drop');
-  }
-  let dragTimer = 0;
-  const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
-  window.addEventListener('dragover', (e) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault(); // ドロップしたファイルをブラウザが開いてしまわないように
-    root.classList.add('is-dragging-file');
-    clearTimeout(dragTimer);
-    dragTimer = setTimeout(() => root.classList.remove('is-dragging-file'), 200);
-  });
-  window.addEventListener('drop', (e) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    root.classList.remove('is-dragging-file');
-    const file = Array.from(e.dataTransfer.files).find((f) => FONT_FILE.test(f.name));
-    if (file) tryFontFile(file).catch(() => alert(`「${file.name}」はフォントとして読み込めませんでした`));
-    else alert('フォントファイル（.otf / .ttf / .woff / .woff2）をドロップしてください');
-  });
 
   function modeButtons(current, opt) {
     const c = opt.iconChar;
@@ -808,7 +589,7 @@
     const y = window.scrollY;
     app.replaceChildren(h('main', { class: 'page-grid' },
       h('h1', { class: 'visually-hidden' }, 'CHIMERABET'),
-      siteHead(editableLogo(), 'home'),
+      siteHead(logoLink(mode), 'home'),
       h('div', { class: 'grid' }, cells,
         modeButtons(mode, { className: 'grid-controls', href: (m) => `#/grid/${m}`, iconChar: BY.A, style: controlInsets(mode) }))));
     window.scrollTo(0, y);
