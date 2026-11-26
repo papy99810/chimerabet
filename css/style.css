@@ -395,6 +395,9 @@ html.popup-open { overflow: hidden; }
     gap: 12px;
   }
   .grid-controls .mode-btn { width: 52px; box-shadow: 0 4px 14px rgba(0, 0, 0, .22); }
+  /* キーボードで編集している間は、表示切り替えボタンを隠す（フェードアウト。編集を終えると戻る） */
+  .modes.grid-controls { transition: opacity .25s ease, visibility 0s linear 0s; }
+  .page-grid.is-editing .modes.grid-controls { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .25s ease, visibility 0s linear .25s; }
   .grid-controls .mode-btn[aria-current="true"] { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--btn), 0 4px 14px rgba(0, 0, 0, .22); }
   .page-grid { padding-bottom: calc(100px + env(safe-area-inset-bottom)); } /* 最後の行がボタンに隠れないように */
 

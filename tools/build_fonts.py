@@ -319,6 +319,13 @@ def main():
         'turntable': videos('turntable'),
         'turntableGrid': videos('turntable/grid'),
     }
+    # 動画ごとの最初のコマの静止画（読み込み中に先に見せる）
+    data['posters'] = {}
+    for kind in ('animation', 'animationGrid', 'turntable', 'turntableGrid'):
+        for src in data[kind].values():
+            jpg = src[:-4] + '.jpg'
+            if os.path.exists(os.path.join(site, jpg)):
+                data['posters'][src] = jpg
     js = ('/* 自動生成ファイル（tools/build_fonts.py）。手で書き換えないでください */\n'
           'window.CHIMERA_ASSETS = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n')
     with open(os.path.join(site, 'js', 'assets.js'), 'w', encoding='utf-8') as fh:

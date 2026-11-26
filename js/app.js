@@ -42,8 +42,11 @@
   }
   const img = (src, cls) => h('img', { src, class: cls, alt: '', draggable: 'false' });
 
+  // 動画の最初のコマの静止画（tools が書き出したもの。読み込み中に先に見せる）
+  const posterOf = (src) => (AS.posters || {})[Array.isArray(src) ? src[0] : src] || null;
+
   function makeVideo(src, loop) {
-    const v = h('video', { class: 'media', playsinline: true, muted: true, preload: 'auto', disablepictureinpicture: true });
+    const v = h('video', { class: 'media', playsinline: true, muted: true, preload: 'auto', disablepictureinpicture: true, poster: posterOf(src) });
     v.muted = true;
     v.playsInline = true;
     v.loop = !!loop;
@@ -208,41 +211,148 @@
     };
   }
 
+  /* 一覧の動画のまとめ役
+     まず最初のコマの静止画を読み込んで見せ、それが届いてから動画を読み込み始める（回線を取り合わないように）。
+     全部の動画が読み込めたら、そろって最初から動かす。
+     （最大 8 秒待っても読み込めない動画は、読み込めた時点で、ほかと同じ向き・位置に合わせて動き出す）
+     あとから足したマスの動画も、読み込めたらほかと同じ位置に合わせて動き出す。
+     動き出したあとは 2 秒ごとに見回って、ずれた動画だけ合わせ直す（読み込み途中で位置合わせが遅れた分なども） */
+  function makeVideoGroup() {
+    const items = new Set();
+    let live = false;     // 動き出したか
+    let active = false;   // 動かしてよいか（個別ページを開いている間は止める）
+    let t0 = 0;           // 動き出した時刻（止めていた時間はずらす）
+    let pausedAt = null;
+    let timer = 0;
+    let patrol = 0;
+    let begun = false;    // 動画の読み込みを始めたか
+    let scheduled = false;
+    const posters = [];
+    const isReady = (v) => v.readyState >= 3;
+    const synced = new WeakSet(); // 動き出したあと、ほかと位置を合わせた動画
+    const elapsed = () => ((pausedAt == null ? performance.now() : pausedAt) - t0) / 1000;
+    function join(v) {
+      const d = v.duration;
+      try { v.currentTime = d && isFinite(d) ? elapsed() % d : 0; } catch (e) { /* まだ位置を変えられない */ }
+      synced.add(v);
+      if (active) v.play().catch(noop);
+      else v.pause();
+    }
+    function goLive() {
+      if (live) return;
+      live = true;
+      clearTimeout(timer);
+      t0 = performance.now();
+      if (!active) pausedAt = t0;
+      items.forEach((v) => { if (isReady(v)) join(v); });
+      patrol = setInterval(resync, 2000);
+    }
+    // 本来の位置から 0.2 秒以上ずれている動画だけ合わせ直す（ループの切れ目をまたぐずれも考える）
+    function resync() {
+      if (!items.size) { clearInterval(patrol); return; }
+      if (!active) return;
+      items.forEach((v) => {
+        const d = v.duration;
+        if (!synced.has(v) || v.paused || v.seeking || !isReady(v) || !d || !isFinite(d)) return;
+        const want = elapsed() % d;
+        const gap = Math.abs(v.currentTime - want);
+        if (Math.min(gap, d - gap) > 0.2) v.currentTime = want;
+      });
+    }
+    const check = () => { if (!live && items.size && [...items].every(isReady)) goLive(); };
+    // 動画の読み込みを始める。スマホは再生しないと読み込みを始めないことがあるので、いったん再生してすぐ止める
+    // （止める前に動き出してしまったら、ほかと位置を合わせる）
+    function load(v) {
+      v.preload = 'auto';
+      v.play().then(() => { if (!live) v.pause(); else if (!synced.has(v)) join(v); }).catch(noop);
+    }
+    function begin() {
+      if (begun) return;
+      begun = true;
+      items.forEach((v) => { if (!synced.has(v)) load(v); });
+    }
+    // 静止画が全部届いたら（最大 2.5 秒）動画の読み込みを始める
+    function scheduleBegin() {
+      if (scheduled) return;
+      scheduled = true;
+      setTimeout(() => {
+        const waits = posters.map((src) => new Promise((done) => { const im = new Image(); im.onload = im.onerror = done; im.src = src; }));
+        Promise.race([Promise.all(waits), new Promise((done) => setTimeout(done, 2500))]).then(begin);
+      }, 0);
+    }
+    return {
+      add(v) {
+        items.add(v);
+        v.addEventListener('canplay', () => {
+          if (!live) check();
+          else if (!synced.has(v)) join(v); // 遅れて読み込めた動画・あとから足した動画は、ほかと同じ位置から
+        });
+        if (!begun) {
+          v.preload = 'none'; // 静止画が届くまで、動画はまだ読み込まない
+          if (v.poster) posters.push(v.poster);
+          scheduleBegin();
+        } else if (live && isReady(v)) {
+          join(v);
+        } else {
+          load(v); // あとから足したマスの動画
+        }
+        return v;
+      },
+      remove(v) { items.delete(v); check(); },
+      start() {
+        if (active) return;
+        active = true;
+        if (live) {
+          if (pausedAt != null) { t0 += performance.now() - pausedAt; pausedAt = null; }
+          items.forEach((v) => { if (isReady(v)) join(v); });
+        } else {
+          check();
+          if (!timer) timer = setTimeout(goLive, 8000);
+        }
+      },
+      pause() {
+        if (!active) return;
+        active = false;
+        if (live) pausedAt = performance.now();
+        items.forEach((v) => v.pause());
+      },
+    };
+  }
+
   // 一覧：アニメーション動画をマスの中で流す（大きさ・位置は一覧のターンテーブルと同じ）
-  function viewGridAnimation(c) {
+  function viewGridAnimation(c, group) {
     const vid = makeVideo(c.animationGrid || c.animation, true);
     if (c.animationKeyBlack) vid.classList.add('key-black');
+    group.add(vid);
     return {
       el: h('div', { class: `view grid-video${c.animationGrid ? '' : ' is-full'}` }, vid),
-      start() { vid.play().catch(noop); },
-      pause() { vid.pause(); },
-      stop() { releaseVideo(vid); },
+      start: group.start,
+      pause: group.pause,
+      stop() { group.remove(vid); releaseVideo(vid); },
     };
   }
 
   const isVideoSrc = (src) => typeof src === 'string' || Array.isArray(src);
 
-  function viewTurntable(c, ctx) {
+  function viewTurntable(c, ctx, group) {
     if (ctx === 'grid') {
       const src = c.turntableGrid || c.turntable;
-      if (isVideoSrc(src)) return spinGridVideo(src);
+      if (isVideoSrc(src)) return spinGridVideo(src, group);
     } else if (isVideoSrc(c.turntable)) {
       return spinVideo(c.turntable);
     }
     return spinLayers(c, ctx);
   }
 
-  // 一覧：小さい回転動画を流すだけ。全員の向きがそろうよう、時計に合わせて再生位置を決める
-  function spinGridVideo(src) {
+  // 一覧：小さい回転動画（全員の向きがそろうよう、まとめ役が再生位置を合わせる）
+  function spinGridVideo(src, group) {
     const vid = makeVideo(src, true);
-    let on = false;
-    const sync = () => { if (vid.duration) vid.currentTime = (performance.now() / 1000) % vid.duration; };
-    vid.addEventListener('loadedmetadata', () => { if (on) sync(); });
+    group.add(vid);
     return {
       el: h('div', { class: 'view view-turntable grid-video' }, vid),
-      start() { on = true; sync(); vid.play().catch(noop); },
-      pause() { on = false; vid.pause(); },
-      stop() { on = false; releaseVideo(vid); },
+      start: group.start,
+      pause: group.pause,
+      stop() { group.remove(vid); releaseVideo(vid); },
     };
   }
 
@@ -582,6 +692,7 @@
     const gridEl = h('div', { class: 'grid' });
     let entries = []; // { letter, idx（並びの中の位置）, el, view }
     let playing = false;
+    const group = makeVideoGroup(); // 一覧の動画のまとめ役（全部読み込めたら、そろって動かす）
 
     function makeCell(c) {
       let view = null;
@@ -589,7 +700,7 @@
       if (mode === 'silhouette') {
         content = viewStill(c);
       } else {
-        view = mode === 'turntable' ? viewTurntable(c, 'grid') : viewGridAnimation(c);
+        view = mode === 'turntable' ? viewTurntable(c, 'grid', group) : viewGridAnimation(c, group);
         content = view.el;
       }
       const el = h('a', {
@@ -611,6 +722,24 @@
     });
     gridEl.append(controls);
 
+    // PC：表示切り替えボタンは、文字を減らしても最初の並び（A〜Z）のときの行より上には上がらない
+    //     （足していって最初の行より下へ回るときは、今までどおり下がる）
+    const baseCount = charsFor(mode).length;
+    const colCount = () => getComputedStyle(gridEl).gridTemplateColumns.split(' ').filter((t) => t && t !== 'none').length || 7;
+    // マスが n 個のとき、ボタン（右側 2 マス分）が入る行（1 から数える）
+    const controlsRow = (n, cols) => {
+      if (!n) return 1;
+      const last = Math.ceil(n / cols);
+      return n - (last - 1) * cols <= cols - 2 ? last : last + 1;
+    };
+    function placeControls() {
+      const cols = colCount();
+      controls.style.gridRowStart = String(Math.max(controlsRow(entries.length, cols), controlsRow(baseCount, cols)));
+      // キャラクターがいない行も、マスと同じ高さにする（全部消しても、ボタンの位置が変わらないように）
+      const cell = parseFloat(getComputedStyle(gridEl).gridTemplateColumns);
+      if (cell > 0) gridEl.style.gridAutoRows = `${cell}px`;
+    }
+
     // 並びが変わったら、変わった部分のマスだけ作り直す（前後の同じ部分はそのまま。動画も読み直さない）
     function update(seq) {
       const letters = [];
@@ -629,6 +758,7 @@
       });
       entries.splice(k, 0, ...added);
       entries.forEach((e, j) => { e.idx = letters[j].idx; });
+      placeControls();
       renderCaret();
     }
 
@@ -687,8 +817,8 @@
     update(sequence);
 
     const typing = makeTyping({
-      // 文字が増えたり減ったりしたとき
-      edit(atEnd) {
+      // 文字が増えたり減ったりしたとき（atEnd：最後を編集した / grew：増えた）
+      edit(atEnd, grew) {
         const before = controls.getBoundingClientRect().top;
         update(sequence);
         const dy = controls.getBoundingClientRect().top - before;
@@ -700,14 +830,14 @@
           if (dy > 0 && document.documentElement.scrollHeight < need) main.style.minHeight = `${Math.ceil(need)}px`;
           window.scrollBy(0, dy);
         }
-        showCaret(atEnd);
+        showCaret(atEnd && grew);
       },
       // カーソルだけ動いたとき
       move() { renderCaret(); showCaret(false); },
       stops: caretStops,
       vertical: verticalCaret,
     });
-    // カーソルのあたりが隠れていたら、見える所までスクロール
+    // カーソルのあたりが隠れていたら、見える所までスクロール（最後に足したときは、うしろのボタンまで）
     function showCaret(atEnd) {
       if (isPhone()) {
         const cell = caretCell();
@@ -739,6 +869,8 @@
       typing.input,
       typing.btn);
     app.replaceChildren(main);
+    placeControls(); // ページに置いてから、実際の列の数で置き直す
+    onGridResize = placeControls; // 画面の幅が変わって列の数が変わったときも
     window.scrollTo(0, y);
 
     return {
@@ -748,6 +880,10 @@
       stop() { playing = false; entries.forEach((e) => e.view && e.view.stop()); },
     };
   }
+
+  // 画面の幅が変わったら、いま表示しているホームの表示切り替えボタンを置き直す
+  let onGridResize = noop;
+  window.addEventListener('resize', () => onGridResize());
 
   // 画面上の範囲 r が、画面の下（キーボードや固定したボタン）に隠れていたら、見える所までスクロール
   function reveal(r, margin) {
@@ -792,11 +928,12 @@
     function apply(seq, caret) {
       const atEnd = caretPos === sequence.length;
       const changed = seq !== sequence;
+      const grew = seq.length > sequence.length;
       sequence = seq;
       caretPos = clamp(caret, 0, seq.length);
       if (input.value !== seq) input.value = seq;
       if (document.activeElement === input) input.setSelectionRange(caretPos, caretPos);
-      if (changed) hooks.edit(atEnd);
+      if (changed) hooks.edit(atEnd, grew);
       else hooks.move();
     }
     function start(caret) {
@@ -858,9 +995,10 @@
       if (e.isComposing) { // 変換中の文字はまだ整えない（入力欄には触らない）
         if (seq !== sequence) {
           const atEnd = caretPos === sequence.length;
+          const grew = seq.length > sequence.length;
           sequence = seq;
           caretPos = caret;
-          hooks.edit(atEnd);
+          hooks.edit(atEnd, grew);
         }
         return;
       }

@@ -9,10 +9,12 @@
 //   ・それ以外で先頭が英字の動画 … アニメーション
 //       assets/animation/B.mp4       背景が黒なら白背景に変換
 //       assets/animation/grid/B.mp4  ホーム一覧用（一覧のターンテーブルと同じ切り抜き・大きさ）
+//   ・書き出した動画ごとに、最初のコマの静止画（同じ名前の .jpg）も作る（読み込み中に先に見せる）
 // =====================================================================
 import AVFoundation
 import CoreImage
 import Foundation
+import ImageIO
 
 // ---------- 調整用 ----------
 let SECONDS_PER_TURN = 6.0 // ターンテーブル1回転の秒数
@@ -152,12 +154,15 @@ final class Writer {
 }
 
 
-// 元の動画もこのツールも前回から変わっていなければ、書き出しを省く
+// 元の動画も書き出しの設定も前回から変わっていなければ、書き出しを省く
 // （書き出し直すと中身が同じでも毎回ファイルが変わり、GitHub に毎回まるごと上がってしまうため）
+// 動画の作り方（色の変換など）を変えたときは VIDEO_FORMAT を 1 増やすと、全部書き出し直す
+let VIDEO_FORMAT = 3
 func modified(_ url: URL) -> Date? { (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date }
-let TOOL_DATE = modified(URL(fileURLWithPath: #filePath)) ?? Date()
+var settingsChanged = false // 書き出しの設定が前回と違うか（下で調べる）
 func upToDate(_ src: URL, _ outs: [URL]) -> Bool {
-  let need = max(modified(src) ?? Date(), TOOL_DATE)
+  if settingsChanged { return false }
+  let need = modified(src) ?? Date()
   return outs.allSatisfy { (modified($0) ?? .distantPast) > need }
 }
 
@@ -222,6 +227,16 @@ let srcRoot = URL(fileURLWithPath: args[1])
 let outRoot = URL(fileURLWithPath: args[2])
 let only = Set(args.dropFirst(3).map { $0.uppercased() })
 
+// 書き出しの設定を前回と比べる（assets/video-settings.txt に残しておく）
+let settingsURL = outRoot.appendingPathComponent("video-settings.txt")
+let settings = "format \(VIDEO_FORMAT) / turn \(SECONDS_PER_TURN)s step \(MIN_STEP_DEG) / \(TT_DETAIL) / \(TT_GRID) / \(ANIM) / \(ANIM_GRID)"
+if let old = try? String(contentsOf: settingsURL, encoding: .utf8) {
+  settingsChanged = old != settings
+  if settingsChanged { print("書き出しの設定が変わったので、動画を全部書き出し直します") }
+}
+try? FileManager.default.createDirectory(at: outRoot, withIntermediateDirectories: true)
+try? settings.write(to: settingsURL, atomically: true, encoding: .utf8)
+
 let files = (FileManager.default.enumerator(at: srcRoot, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? [])
   .filter { ["mp4", "mov", "m4v"].contains($0.pathExtension.lowercased()) }
   .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -245,11 +260,11 @@ for L in tt.keys.sorted() {
     ], turntable: true)
   }
 }
-// 素材フォルダから消えた文字の動画は消す（全部の文字を書き出すときだけ）
+// 素材フォルダから消えた文字の動画（と静止画）は消す（全部の文字を書き出すときだけ）
 if only.isEmpty {
   for (dir, have) in [("turntable", tt), ("turntable/grid", tt), ("animation", anim), ("animation/grid", anim)] {
     let d = outRoot.appendingPathComponent(dir)
-    for f in (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? [] where f.hasSuffix(".mp4") {
+    for f in (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? [] where f.hasSuffix(".mp4") || f.hasSuffix(".jpg") {
       if have[String(f.dropLast(4))] == nil {
         try? FileManager.default.removeItem(at: d.appendingPathComponent(f))
         print("  素材にない \(dir)/\(f) を削除")
@@ -266,3 +281,55 @@ for L in anim.keys.sorted() {
     ], turntable: false)
   }
 }
+
+// ---------------------------------------------------------------------
+// 書き出した動画の最初のコマを JPEG にする（動画とこのツールより新しい静止画があれば作り直さない）
+// 動画と同じく YUV のまま受け取って CoreImage で RGB にする（標準の取り出し方だと白が 254 になり、薄い四角が見える）
+let TOOL_DATE = modified(URL(fileURLWithPath: #filePath)) ?? Date()
+func writePoster(_ video: URL) -> Bool {
+  let poster = video.deletingPathExtension().appendingPathExtension("jpg")
+  if let p = modified(poster), let v = modified(video), p > v, p > TOOL_DATE { return false }
+  let asset = AVURLAsset(url: video)
+  guard let track = asset.tracks(withMediaType: .video).first, let reader = try? AVAssetReader(asset: asset) else { return false }
+  let ro = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange])
+  reader.add(ro)
+  reader.startReading()
+  guard let sb = ro.copyNextSampleBuffer(), let pb = CMSampleBufferGetImageBuffer(sb) else {
+    print("  最初のコマを取り出せませんでした: \(video.lastPathComponent)")
+    return false
+  }
+  reader.cancelReading()
+  var img = CIImage(cvPixelBuffer: pb)
+  // macOS の JPEG 保存は、大きい画像（1920×1080 など）だと真っ白が 254 になるので、幅 1280 までに縮める
+  // （読み込み中に一瞬見せるだけなので、これで十分）
+  if img.extent.width > 1280 {
+    let k = 1280 / img.extent.width
+    img = img.clampedToExtent()
+      .applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: k, kCIInputAspectRatioKey: 1.0])
+      .cropped(to: CGRect(x: 0, y: 0, width: (img.extent.width * k).rounded(), height: (img.extent.height * k).rounded()))
+  }
+  let w = Int(img.extent.width), h = Int(img.extent.height)
+  var px = [UInt8](repeating: 0, count: w * h * 4)
+  ctx.render(img, toBitmap: &px, rowBytes: w * 4, bounds: img.extent, format: .RGBA8, colorSpace: nil)
+  // 圧縮で白がわずかに暗く（246〜254）なっている所は 255 にそろえる（白の上で薄い四角に見えないように）
+  for i in stride(from: 0, to: px.count, by: 4) where px[i] >= 246 && px[i + 1] >= 246 && px[i + 2] >= 246 {
+    px[i] = 255; px[i + 1] = 255; px[i + 2] = 255
+  }
+  guard let provider = CGDataProvider(data: Data(px) as CFData),
+        let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                         space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                         provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+        let dest = CGImageDestinationCreateWithURL(poster as CFURL, "public.jpeg" as CFString, 1, nil) else { return false }
+  CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+  return CGImageDestinationFinalize(dest)
+}
+var posters = 0
+for dir in ["turntable", "turntable/grid", "animation", "animation/grid"] {
+  let d = outRoot.appendingPathComponent(dir)
+  for f in ((try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? []).sorted() where f.hasSuffix(".mp4") {
+    if only.isEmpty || only.contains(String(f.prefix(1))) {
+      autoreleasepool { if writePoster(d.appendingPathComponent(f)) { posters += 1 } }
+    }
+  }
+}
+print("最初のコマの静止画 \(posters)枚")
