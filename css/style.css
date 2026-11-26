@@ -5,6 +5,8 @@
   --font-title: "Avenir Next Condensed", "Myriad Pro", "Arial Narrow", "Roboto Condensed", sans-serif;
   --font-logo: "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", system-ui, sans-serif;
   --font-ui: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  /* 画面下に固定するボタンの高さ（キーボードが出ている間は、その分だけ上げる：app.js が --kb-offset を入れる） */
+  --float-bottom: calc(clamp(16px, 2.6vw, 36px) + env(safe-area-inset-bottom) + var(--kb-offset, 0px));
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -74,6 +76,9 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
   display: grid;
   grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
   gap: clamp(12px, 3vw, 43px) var(--col-gap);
+  /* 行の高さをそろえる（表示切り替えボタンだけの行も、キャラクターの行と同じ高さにする）
+     → ボタンが次の行へ回ったときも、キャラクターが改行したときも、同じ一段分だけ下がる */
+  grid-auto-rows: 1fr;
 }
 .cell {
   position: relative;
@@ -86,9 +91,11 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
 .cell:hover { opacity: .7; }
 .cell:focus-visible { outline: 3px solid var(--c); }
 
-/* 最後の行の右側2マス分（T・Uの列）にボタンを置き、
+/* PC：表示切り替えボタンは、一覧の最後の行の右側2マス分（T・U の列）に置く
    左端のボタンを T の絵の左端、右端のボタンを U の絵の右端に収める
-   --inset-l / --inset-r … 絵の端がマスの端から何割内側にあるか（app.js がフォントの絵から計算して入れる） */
+   --inset-l / --inset-r … 絵の端がマスの端から何割内側にあるか（app.js がフォントの絵から計算して入れる）
+   文字を足してマスが来たら、ボタンは次の行へ下がる（一覧の最後の項目なので自動でそうなる）
+   スマホは下の @media で画面の右下に固定 */
 .modes.grid-controls {
   grid-column: -3 / -1;
   justify-content: space-between;
@@ -138,37 +145,11 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
 .view { position: absolute; inset: 0; }
 .view-still { padding: 8%; } /* app.js の STILL_PAD と合わせる */
 
-.view-silhouette { padding: 0; }
+/* シルエットは枠の高さの 8 割に収める（動画のキャラクターと同じくらいの背丈。見出しにも重ならない） */
+.view-silhouette { inset: 10% 0; }
 
 /* --- Animation --- */
-/* 動画がない文字の歩くアニメーション：枠の中だけで表示し、両端でフェード */
-.anim-frame {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 22%, #000 78%, transparent 100%);
-          mask-image: linear-gradient(90deg, transparent 0, #000 22%, #000 78%, transparent 100%);
-}
-.anim-mover {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  will-change: transform, opacity;
-}
 .key-black { filter: url(#key-black); }
-.crawl { width: auto; height: 96%; aspect-ratio: 1; animation: crawl .62s ease-in-out infinite alternate; transform-origin: 50% 80%; }
-@keyframes crawl {
-  from { transform: translateY(2%) rotate(-4deg) scaleY(.97); }
-  to   { transform: translateY(-5%) rotate(3deg) scaleY(1.02); }
-}
-/* アニメーション動画：左右の端をフェードさせて、枠から出入りして見えるように */
-.has-video .media {
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
-          mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
-}
 
 /* --- Turntable --- */
 .tt-stage {
@@ -189,10 +170,11 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
 .page-grid .tt-stage { perspective: 900px; }
 .page-grid .tt-rotor { height: 84%; }
 .tt-layer { position: absolute; inset: 0; transform: translateZ(calc(var(--z) * var(--gap, 1px))); }
-/* 回転動画（背景は白。万一わずかに白からずれても目立たないよう乗算で重ねる）
-   一覧用はフォントの絵と足元・大きさがそろうよう、マスより少し大きく置く */
-.tt-grid { inset: 1.5%; }
-.tt-grid .media, .tt-detail .media, .has-video .media { mix-blend-mode: multiply; }
+/* 動画（背景は白。万一わずかに白からずれても目立たないよう乗算で重ねる）
+   一覧のターンテーブル・アニメーションは同じ外枠。フォントの絵と足元・大きさがそろうよう、マスより少し大きく置く */
+.grid-video { inset: 1.5%; overflow: hidden; }
+.grid-video.is-full .media { object-fit: cover; } /* data.js で個別に入れた動画（一覧用がない）は、マスいっぱいに切り抜く */
+.grid-video .media, .tt-detail .media, .view-animation .media { mix-blend-mode: multiply; }
 
 /* =====================================================================
    個別ページ（ホームの上に重ねるポップアップ）
@@ -211,11 +193,13 @@ html.popup-open { overflow: hidden; }
   animation: popup-fade .22s ease both;
 }
 .popup.is-closing { animation: popup-fade-out .2s ease both; pointer-events: none; }
+/* PC：カード = 動画の外枠と同じ 16:9。動画はカードいっぱいに表示し、見出しやボタンはその上に重ねる
+   （シルエットのときも同じ大きさ。スマホは下の @media で縦長のカードにする） */
 .popup-panel {
   position: relative;
-  width: min(calc(100vw - 32px), 1200px);
-  height: min(calc(100vh - 48px), 760px);
-  height: min(calc(100svh - 48px), 760px);
+  width: min(calc(100vw - 32px), 1200px, calc((100vh - 48px) * 16 / 9));
+  width: min(calc(100vw - 32px), 1200px, calc((100svh - 48px) * 16 / 9));
+  aspect-ratio: 16 / 9;
   display: grid;
   grid-template-rows: auto 1fr auto;
   overflow: hidden;
@@ -232,11 +216,11 @@ html.popup-open { overflow: hidden; }
 @keyframes popup-in { from { opacity: 0; transform: translateY(16px) scale(.97); } }
 @keyframes popup-out { to { opacity: 0; transform: translateY(8px) scale(.98); } }
 
-/* 左上の × */
+/* 右上の ×（スマホでは隠して、左下の丸いボタンにする） */
 .close-btn {
   position: absolute;
   top: clamp(10px, 1.6cqw, 22px);
-  left: clamp(10px, 1.6cqw, 22px);
+  right: clamp(10px, 1.6cqw, 22px);
   z-index: 4;
   width: 44px;
   height: 44px;
@@ -254,8 +238,8 @@ html.popup-open { overflow: hidden; }
   grid-row: 1;
   position: relative;
   z-index: 2;
-  /* 左は × と重ならないよう最低 64px */
-  padding: clamp(20px, 3.9cqw, 54px) clamp(24px, 6cqw, 96px) 0 clamp(64px, 6cqw, 96px);
+  /* 右は × と重ならないよう最低 64px */
+  padding: clamp(20px, 3.9cqw, 54px) clamp(64px, 6cqw, 96px) 0 clamp(24px, 6cqw, 96px);
 }
 .detail-title {
   margin: 0;
@@ -268,16 +252,11 @@ html.popup-open { overflow: hidden; }
   color: var(--title, var(--c));
 }
 
-/* 表示枠：カードのちょうど中央（左右の矢印と同じ高さ）に置く 16:9 の枠
-   アニメーション・ターンテーブルの動画（どちらも 1920×1080）は、この枠いっぱいに表示する */
+/* 表示枠：PC ではカードいっぱい（= 動画の外枠） */
 .stage {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  translate: -50% -50%;
+  inset: 0;
   z-index: 1;
-  width: min(78cqw, 1040px, 64cqh * 16 / 9);
-  aspect-ratio: 16 / 9;
   animation: appear .45s ease both;
 }
 @keyframes appear { from { opacity: 0; transform: scale(.96); } }
@@ -322,6 +301,8 @@ html.popup-open { overflow: hidden; }
 }
 .detail-foot .mode-btn { width: clamp(44px, 5.5cqw, 76px); }
 .hint { margin: 0 auto 0 0; color: #a8a8a8; font-size: 13px; letter-spacing: .04em; }
+.mode-btn.close-round { display: none; color: #fff; } /* .mode-btn の display より強く */
+.close-round svg { width: 42%; height: 42%; }
 
 /* =====================================================================
    表示切り替えボタン
@@ -345,7 +326,93 @@ html.popup-open { overflow: hidden; }
 .mode-btn img { object-fit: contain; }
 .mode-btn img.to-white { filter: brightness(0) invert(1); }
 
+/* キーボードボタン：スマホ版のホームだけ。表示切り替えボタンと同じ見た目で、左下に固定 */
+.mode-btn.kb-btn {
+  display: none;
+  position: fixed;
+  left: calc(16px + env(safe-area-inset-left));
+  bottom: var(--float-bottom);
+  z-index: 50;
+  width: 52px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+}
+.mode-btn.kb-btn[aria-pressed="true"] { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--btn), 0 4px 14px rgba(0, 0, 0, .22); }
+/* 文字の編集：PC はキャラクター以外の場所でマウスのカーソルが文字入力の形になる（クリックで編集）
+   編集中は、カーソルの位置（マスとマスのすき間）に点滅する縦棒を出す
+   （マスを1つ分使わないので、編集を始めてもボタンの位置は動かない。先頭なら最初のマスの左、空なら一覧の先頭） */
+@media (min-width: 601px) { .page-grid { cursor: text; } }
+.grid { position: relative; }
+.page-grid.is-editing .cell.caret-after::after,
+.page-grid.is-editing .cell.caret-before::after,
+.page-grid.is-editing .grid.is-empty::before {
+  content: "";
+  position: absolute;
+  width: clamp(3px, .35vw, 5px);
+  border-radius: 2px;
+  background: #333;
+  pointer-events: none;
+  animation: caret-blink 1.06s steps(1) infinite;
+}
+.page-grid.is-editing .cell.caret-after::after,
+.page-grid.is-editing .cell.caret-before::after { top: 25%; height: 50%; left: calc(100% + var(--col-gap) / 2); translate: -50% 0; }
+.page-grid.is-editing .cell.caret-before::after { left: calc(var(--col-gap) / -2); }
+.page-grid.is-editing .grid.is-empty::before { top: 0; left: 0; height: clamp(40px, 8vw, 110px); }
+@keyframes caret-blink { 50% { opacity: 0; } }
+/* キーボードを出すための見えない入力欄（16px 未満だと iPhone が画面を拡大してしまう） */
+.kb-input {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;
+  caret-color: transparent;
+  pointer-events: none;
+}
+
+/* =====================================================================
+   スマホ
+   ===================================================================== */
 @media (max-width: 600px) {
-  .detail-foot { flex-wrap: wrap; }
+  /* 個別ページ：× は左下の丸いボタンに（表示切り替えボタンと同じ見た目・大きさ） */
+  .close-btn { display: none; }
+  .mode-btn.close-round { display: grid; }
+  .mode-btn.kb-btn { display: grid; }
+
+  /* ホーム：表示切り替えボタンは画面の右下に固定（左下のキーボードボタンと同じ高さ） */
+  .modes.grid-controls {
+    position: fixed;
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: var(--float-bottom);
+    z-index: 50;
+    padding: 0;
+    gap: 12px;
+  }
+  .grid-controls .mode-btn { width: 52px; box-shadow: 0 4px 14px rgba(0, 0, 0, .22); }
+  .grid-controls .mode-btn[aria-current="true"] { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--btn), 0 4px 14px rgba(0, 0, 0, .22); }
+  .page-grid { padding-bottom: calc(100px + env(safe-area-inset-bottom)); } /* 最後の行がボタンに隠れないように */
+
+  /* カードは縦長にして、16:9 の表示枠をカードのまん中に置く */
+  .popup-panel { width: calc(100vw - 32px); height: min(calc(100svh - 48px), 760px); aspect-ratio: auto; }
+  .stage {
+    inset: auto;
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+    width: min(78cqw, 64cqh * 16 / 9);
+    aspect-ratio: 16 / 9;
+  }
+  .detail-head { padding-right: 24px; }
+  .detail-foot { flex-wrap: wrap; justify-content: space-between; row-gap: 12px; }
   .hint { width: 100%; text-align: center; margin: 0; order: -1; }
+
+  /* ロゴは1行に収める（画面の幅に合わせて小さくする。6.3 ≒ ロゴの幅 ÷ 文字の大きさ） */
+  .logo[data-font="glyph"] { font-size: min(46px, calc((100vw - 110px) / 6.3)); white-space: nowrap; }
+
 }

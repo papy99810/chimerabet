@@ -315,6 +315,7 @@ def main():
         'metrics': metrics if metrics_written else None,
         'mono': mono_svgs,
         'animation': videos('animation'),
+        'animationGrid': videos('animation/grid'),
         'turntable': videos('turntable'),
         'turntableGrid': videos('turntable/grid'),
     }

@@ -8,6 +8,7 @@
 //       元の動画は「ゆっくり始まってゆっくり止まる」1回転なので、一定の速さで回り続けるよう並べ直す
 //   ・それ以外で先頭が英字の動画 … アニメーション
 //       assets/animation/B.mp4       背景が黒なら白背景に変換
+//       assets/animation/grid/B.mp4  ホーム一覧用（一覧のターンテーブルと同じ切り抜き・大きさ）
 // =====================================================================
 import AVFoundation
 import CoreImage
@@ -33,10 +34,13 @@ struct Out {
 let TT_DETAIL = Out(crop: CGRect(x: 0, y: 0, width: 1920, height: 1080), width: 1920, height: 1080, keyInterval: 4, quality: 0.8)
 // 一覧用：一覧の静止画（フォントの絵）と足元・大きさがそろう位置
 let TT_GRID = Out(crop: CGRect(x: 416, y: 129, width: 1088, height: 1088), width: 288, height: 288, keyInterval: 30, quality: 0.72)
+// ホーム一覧用のアニメーション：一覧のターンテーブルと同じ切り抜き（外枠がそろう）
+let ANIM_GRID = Out(crop: TT_GRID.crop, width: TT_GRID.width, height: TT_GRID.height, keyInterval: 24, quality: TT_GRID.quality)
 let ANIM = Out(crop: CGRect(x: 0, y: 0, width: 1920, height: 1080), width: 1920, height: 1080, keyInterval: 24, quality: 0.78)
 
 let ctx = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
 let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: -4000, y: -4000, width: 12000, height: 12000))
+let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: CGRect(x: -4000, y: -4000, width: 12000, height: 12000))
 
 func fail(_ s: String) -> Never { FileHandle.standardError.write((s + "\n").data(using: .utf8)!); exit(1) }
 
@@ -54,6 +58,7 @@ func keyBlackToWhite(_ img: CIImage) -> CIImage {
   return inv.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: img])
     .settingAlphaOne(in: img.extent)
     .applyingFilter("CIColorClamp")
+    .cropped(to: img.extent)
 }
 
 final class Writer {
@@ -108,11 +113,16 @@ final class Writer {
   func append(_ src: CIImage, srcHeight: CGFloat, keyBlack: Bool, at t: CMTime) {
     // CoreImage は左下原点なので y を反転して切り抜く
     let c = out.crop
-    var img = src
-    if keyBlack { img = keyBlackToWhite(img) }
-    img = img.composited(over: white)
-      .cropped(to: CGRect(x: c.minX, y: srcHeight - c.maxY, width: c.width, height: c.height))
-      .transformed(by: CGAffineTransform(translationX: -c.minX, y: -(srcHeight - c.maxY)))
+    let rect = CGRect(x: c.minX, y: srcHeight - c.maxY, width: c.width, height: c.height)
+    var img: CIImage
+    if keyBlack {
+      // 黒背景：切り抜きで元の画面からはみ出す部分もいったん黒で埋めてから、まとめて黒 → 白に変換する
+      // （白で埋めてから変換すると、YUV に描いたときにはみ出した部分が黒くなる）
+      img = keyBlackToWhite(src.composited(over: black).cropped(to: rect))
+    } else {
+      img = src.composited(over: white).cropped(to: rect)
+    }
+    img = img.transformed(by: CGAffineTransform(translationX: -c.minX, y: -(srcHeight - c.maxY)))
     let sx = CGFloat(out.width) / c.width
     if abs(sx - 1) > 0.001 {
       // 縮小時に枠の外（透明）を拾って縁が暗くならないよう、端の色を外側へ延ばしてから縮小
@@ -237,7 +247,7 @@ for L in tt.keys.sorted() {
 }
 // 素材フォルダから消えた文字の動画は消す（全部の文字を書き出すときだけ）
 if only.isEmpty {
-  for (dir, have) in [("turntable", tt), ("turntable/grid", tt), ("animation", anim)] {
+  for (dir, have) in [("turntable", tt), ("turntable/grid", tt), ("animation", anim), ("animation/grid", anim)] {
     let d = outRoot.appendingPathComponent(dir)
     for f in (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? [] where f.hasSuffix(".mp4") {
       if have[String(f.dropLast(4))] == nil {
@@ -250,6 +260,9 @@ if only.isEmpty {
 print("アニメーション \(anim.count)本")
 for L in anim.keys.sorted() {
   autoreleasepool {
-    process(anim[L]!, outs: [(outRoot.appendingPathComponent("animation/\(L).mp4"), ANIM)], turntable: false)
+    process(anim[L]!, outs: [
+      (outRoot.appendingPathComponent("animation/\(L).mp4"), ANIM),
+      (outRoot.appendingPathComponent("animation/grid/\(L).mp4"), ANIM_GRID),
+    ], turntable: false)
   }
 }

@@ -12,12 +12,11 @@
   const CFG = window.CHIMERABET || {};
   const AS = Object.assign({ fonts: [], metrics: null, mono: {}, animation: {}, turntable: {}, turntableGrid: {} }, window.CHIMERA_ASSETS);
   const S = Object.assign({
-    animationMs: 6500,
     secondsPerTurn: 6,
     dragDegPerPx: 0.5,
   }, CFG.settings);
 
-  const MODES = ['animation', 'silhouette', 'turntable'];
+  const MODES = ['turntable', 'animation', 'silhouette']; // 表示切り替えボタンの並び（左から）
   const LABEL = { animation: 'Animation', silhouette: 'Silhouette', turntable: 'Turntable' };
   const LABEL_JA = { animation: 'アニメーション表示', silhouette: 'シルエット表示', turntable: 'ターンテーブル表示' };
   const LOGO_COLORS = ['#5BB32F', '#1E9BD7', '#9CC31B', '#E4007F', '#F39800', '#EA5514', '#E60012', '#3E3A8E', '#F6AB00', '#6AB72D'];
@@ -132,6 +131,7 @@
       silhouetteIcon: silGlyph ? glyphURL(SIL_FONT, letter, '#fff') : null,
       animation: anim.src || null,
       animationKeyBlack: !!anim.keyBlack,
+      animationGrid: (!a.animation && AS.animationGrid[letter]) || null, // ホーム一覧用（ターンテーブルと同じ切り抜き）
       turntable: a.turntable || AS.turntable[letter] || null,
       turntableGrid: a.turntableGrid || AS.turntableGrid[letter] || null,
       hasIllust: !!(a.illust || ILLUST_FONT),
@@ -140,10 +140,20 @@
   });
   const BY = {};
   CHARS.forEach((c) => { BY[c.letter] = c; });
-  const prevOf = (c) => CHARS[(c.index + CHARS.length - 1) % CHARS.length];
-  const nextOf = (c) => CHARS[(c.index + 1) % CHARS.length];
+  const ANIM_CHARS = CHARS.filter((c) => c.animation);
+  // その表示モードで出す文字（アニメーション表示は、アニメーションがある文字だけ）
+  const charsFor = (mode) => (mode === 'animation' ? ANIM_CHARS : CHARS);
+  const hasMode = (c, mode) => mode !== 'animation' || !!c.animation;
+  function stepOf(c, mode, d) {
+    const list = charsFor(mode);
+    const i = list.indexOf(c);
+    return list[((i < 0 ? 0 : i) + d + list.length) % list.length];
+  }
+  const prevOf = (c, mode) => stepOf(c, mode, -1);
+  const nextOf = (c, mode) => stepOf(c, mode, 1);
 
   const ICON = {
+    keyboard: '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="5.5" y="13" width="37" height="23" rx="4" stroke="#fff" stroke-width="2.8"/><path d="M12 20.2h1.6M18.2 20.2h1.6M24.4 20.2h1.6M30.6 20.2h1.6M36 20.2h.4M12 26.2h1.6M18.2 26.2h1.6M24.4 26.2h1.6M30.6 26.2h1.6M36 26.2h.4M16.5 31h15" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/></svg>',
     animation: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M18 11.8v24.4c0 1.3 1.4 2 2.5 1.3l18.6-12.2a1.5 1.5 0 0 0 0-2.6L20.5 10.5c-1.1-.7-2.5 0-2.5 1.3z" fill="#fff"/></svg>',
     turntable: '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><circle cx="24" cy="18.5" r="11" fill="#fff"/><path d="M9 31.4C6.4 32.5 5 33.8 5 35.2 5 39 13.5 42 24 42s19-3 19-6.8c0-1.5-1.4-2.9-3.8-4" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/><path d="M44.4 29.2l-5.2 1.2 2.6 5" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
@@ -182,36 +192,31 @@
     return { el: h('div', { class: 'view view-silhouette' }, img(c.silhouetteCentered, 'media')), start: noop, stop: noop };
   }
 
-  // 一覧用：動かない絵（シルエット表示ならシルエット、それ以外は斜め向きのイラスト）
-  function viewStill(c, mode) {
-    return h('div', { class: 'view view-still' }, img(mode === 'silhouette' ? c.silhouette : c.illust, 'media'));
+  // 一覧用：シルエット表示の絵
+  function viewStill(c) {
+    return h('div', { class: 'view view-still' }, img(c.silhouette, 'media'));
   }
 
-  const WALK = [
-    { transform: 'translateX(68%)', opacity: 0 },
-    { transform: 'translateX(40%)', opacity: 1, offset: 0.14 },
-    { transform: 'translateX(-40%)', opacity: 1, offset: 0.86 },
-    { transform: 'translateX(-68%)', opacity: 0 },
-  ];
-
+  // アニメーション動画（終わったら最初から繰り返す）。アニメーションがある文字だけで使う
   function viewAnimation(c) {
-    if (c.animation) {
-      const vid = makeVideo(c.animation, true);
-      if (c.animationKeyBlack) vid.classList.add('key-black');
-      return {
-        el: h('div', { class: 'view view-animation has-video' }, vid),
-        // 終わったら最初から繰り返す
-        start() { vid.currentTime = 0; vid.play().catch(noop); },
-        stop() { releaseVideo(vid); },
-      };
-    }
-    // 動画がない文字：枠の右外から歩いてきて左外へ抜ける（枠の両端はマスクでフェード）
-    const mover = h('div', { class: 'anim-mover' }, h('div', { class: 'crawl' }, img(c.illust, 'media')));
-    let anim = null;
+    const vid = makeVideo(c.animation, true);
+    if (c.animationKeyBlack) vid.classList.add('key-black');
     return {
-      el: h('div', { class: 'view view-animation' }, h('div', { class: 'anim-frame' }, mover)),
-      start() { anim = mover.animate(WALK, { duration: S.animationMs, easing: 'linear', iterations: Infinity }); },
-      stop() { if (anim) anim.cancel(); },
+      el: h('div', { class: 'view view-animation' }, vid),
+      start() { vid.currentTime = 0; vid.play().catch(noop); },
+      stop() { releaseVideo(vid); },
+    };
+  }
+
+  // 一覧：アニメーション動画をマスの中で流す（大きさ・位置は一覧のターンテーブルと同じ）
+  function viewGridAnimation(c) {
+    const vid = makeVideo(c.animationGrid || c.animation, true);
+    if (c.animationKeyBlack) vid.classList.add('key-black');
+    return {
+      el: h('div', { class: `view grid-video${c.animationGrid ? '' : ' is-full'}` }, vid),
+      start() { vid.play().catch(noop); },
+      pause() { vid.pause(); },
+      stop() { releaseVideo(vid); },
     };
   }
 
@@ -234,7 +239,7 @@
     const sync = () => { if (vid.duration) vid.currentTime = (performance.now() / 1000) % vid.duration; };
     vid.addEventListener('loadedmetadata', () => { if (on) sync(); });
     return {
-      el: h('div', { class: 'view view-turntable tt-grid' }, vid),
+      el: h('div', { class: 'view view-turntable grid-video' }, vid),
       start() { on = true; sync(); vid.play().catch(noop); },
       pause() { on = false; vid.pause(); },
       stop() { on = false; releaseVideo(vid); },
@@ -535,7 +540,7 @@
       return h('img', { src: c.ph.icon, alt: '', draggable: 'false' });
     };
     return h('nav', { class: `modes ${opt.className || ''}`, 'aria-label': '表示の切り替え', style: opt.style || null },
-      MODES.map((m) =>
+      (opt.modes || MODES).map((m) =>
         h('a', {
           class: `mode-btn mode-${m}`,
           href: opt.href(m),
@@ -556,9 +561,10 @@
   // 表示切り替えボタンを、T の絵の左端〜U の絵の右端に収める（マスの幅に対する割合）
   const STILL_PAD = 0.08; // .view-still の余白（style.css と合わせる）
   function controlInsets(mode) {
-    const f = mode === 'silhouette' ? SIL_FONT : mode === 'turntable' ? FRONT_FONT : ILLUST_FONT;
-    const custom = (CFG.assets || {});
-    if (!f || (custom.T && (custom.T.illust || custom.T.silhouette)) || (custom.U && (custom.U.illust || custom.U.silhouette))) return null;
+    if (mode === 'animation') return null; // アニメーション表示は文字を詰めて並べるので、そろえる相手がいない
+    const f = mode === 'silhouette' ? SIL_FONT : FRONT_FONT;
+    const custom = CFG.assets || {};
+    if (!f || (custom.T && custom.T.silhouette) || (custom.U && custom.U.silhouette)) return null;
     const T = f.glyphs.T;
     const U = f.glyphs.U;
     if (!T || !U) return null;
@@ -566,40 +572,320 @@
     return `--inset-l:${(STILL_PAD + (T.x0 / 1000) * inner).toFixed(3)};--inset-r:${(STILL_PAD + (1 - U.x1 / 1000) * inner).toFixed(3)}`;
   }
 
+  // ホームに並べる文字と、編集のカーソルの位置（文字と文字の間。0 = 先頭）
+  // キーボードで消したり足したりできる。再読み込みすると A〜Z に戻る
+  let sequence = LETTERS.join('');
+  let caretPos = sequence.length;
+
   function renderGrid(mode) {
-    // ターンテーブル表示のときだけ全員そろって回転。それ以外は静止画
-    const spinners = [];
-    const cells = CHARS.map((c) => {
+    // ターンテーブル：全員そろって回転 / アニメーション：アニメーションがある文字だけ再生 / シルエット：静止画
+    const gridEl = h('div', { class: 'grid' });
+    let entries = []; // { letter, idx（並びの中の位置）, el, view }
+    let playing = false;
+
+    function makeCell(c) {
+      let view = null;
       let content;
-      if (mode === 'turntable') {
-        const v = viewTurntable(c, 'grid');
-        spinners.push(v);
-        content = v.el;
+      if (mode === 'silhouette') {
+        content = viewStill(c);
       } else {
-        content = viewStill(c, mode);
+        view = mode === 'turntable' ? viewTurntable(c, 'grid') : viewGridAnimation(c);
+        content = view.el;
       }
-      return h('a', {
+      const el = h('a', {
         class: 'cell',
         href: `#/${c.letter}/${mode}`,
         style: `--c:${c.color}`,
         'aria-label': `${c.letter} ${LABEL[mode]}`,
       }, content);
+      return { letter: c.letter, idx: 0, el, view };
+    }
+
+    // 表示切り替えボタン（一覧の最後の項目。スマホでは画面の右下に固定される）
+    const controls = modeButtons(mode, {
+      className: 'grid-controls',
+      href: (m) => `#/grid/${m}`,
+      iconChar: BY.A,
+      style: controlInsets(mode),
+      modes: MODES.filter((m) => charsFor(m).length), // アニメーションが1つもなければボタンを出さない
+    });
+    gridEl.append(controls);
+
+    // 並びが変わったら、変わった部分のマスだけ作り直す（前後の同じ部分はそのまま。動画も読み直さない）
+    function update(seq) {
+      const letters = [];
+      Array.from(seq).forEach((L, idx) => { if (BY[L] && hasMode(BY[L], mode)) letters.push({ L, idx }); });
+      let k = 0;
+      while (k < entries.length && k < letters.length && entries[k].letter === letters[k].L) k++;
+      let m = 0;
+      while (m < entries.length - k && m < letters.length - k
+        && entries[entries.length - 1 - m].letter === letters[letters.length - 1 - m].L) m++;
+      entries.splice(k, entries.length - k - m).forEach((e) => { if (e.view) e.view.stop(); e.el.remove(); });
+      const anchor = entries[k] ? entries[k].el : controls;
+      const added = letters.slice(k, letters.length - m).map(({ L }) => makeCell(BY[L]));
+      added.forEach((e) => {
+        gridEl.insertBefore(e.el, anchor);
+        if (playing && e.view) e.view.start();
+      });
+      entries.splice(k, 0, ...added);
+      entries.forEach((e, j) => { e.idx = letters[j].idx; });
+      renderCaret();
+    }
+
+    // 編集のカーソル：カーソルの前にある最後のマスのすぐ右に出す（先頭なら最初のマスの左、空なら一覧の先頭）
+    function renderCaret() {
+      let j = -1;
+      entries.forEach((e, i) => {
+        e.el.classList.remove('caret-after', 'caret-before');
+        if (e.idx < caretPos) j = i;
+      });
+      gridEl.classList.toggle('is-empty', !entries.length);
+      const prev = entries[j];
+      const next = entries[j + 1];
+      // 行の折り返しをまたぐ位置では、次に打つ文字が入る「次の行の先頭」に出す
+      if (prev && next && next.el.offsetTop > prev.el.offsetTop) next.el.classList.add('caret-before');
+      else if (prev) prev.el.classList.add('caret-after');
+      else if (next) next.el.classList.add('caret-before');
+    }
+    const caretCell = () => gridEl.querySelector('.caret-after, .caret-before');
+
+    // 画面上の点 (x, y) に一番近い「文字と文字の間」（クリックしたところにカーソルを置く）
+    function pointToCaret(x, y) {
+      if (!entries.length) return sequence.length;
+      const gap = parseFloat(getComputedStyle(gridEl).rowGap) || 0;
+      const rows = [];
+      entries.forEach((e) => {
+        const r = e.el.getBoundingClientRect();
+        const row = rows[rows.length - 1];
+        if (row && Math.abs(row.top - r.top) < 2) row.items.push({ e, r });
+        else rows.push({ top: r.top, bottom: r.bottom, items: [{ e, r }] });
+      });
+      if (y < rows[0].top - gap) return sequence.length; // 一覧より上（見出しのあたり）→ 最後
+      const row = rows.find((rw) => y <= rw.bottom + gap / 2);
+      if (!row) return sequence.length; // 一覧より下 → 最後
+      for (const { e, r } of row.items) if (x < r.left + r.width / 2) return e.idx;
+      return row.items[row.items.length - 1].e.idx + 1; // 行の右の余白 → その行の最後
+    }
+    // ← → で止まる位置：先頭と、見えている各マスのすぐうしろ
+    // （アニメーション表示で隠れている文字の前後のように、画面で見て同じ場所には止まらない）
+    function caretStops() {
+      return [...new Set([0, ...entries.map((e) => e.idx + 1)])].sort((p, q) => p - q);
+    }
+    // ↑ ↓：1行上・下の同じ列あたりへ
+    function verticalCaret(dir) {
+      const cell = caretCell();
+      if (!cell) return caretPos;
+      const st = getComputedStyle(gridEl);
+      const r = cell.getBoundingClientRect();
+      const x = cell.classList.contains('caret-after') ? r.right + (parseFloat(st.columnGap) || 0) / 2 : r.left;
+      const y = r.top + r.height / 2 + dir * (r.height + (parseFloat(st.rowGap) || 0));
+      if (y < entries[0].el.getBoundingClientRect().top) return 0;
+      if (y > entries[entries.length - 1].el.getBoundingClientRect().bottom) return sequence.length;
+      return pointToCaret(x, y);
+    }
+
+    update(sequence);
+
+    const typing = makeTyping({
+      // 文字が増えたり減ったりしたとき
+      edit(atEnd) {
+        const before = controls.getBoundingClientRect().top;
+        update(sequence);
+        const dy = controls.getBoundingClientRect().top - before;
+        // PC で最後に足したとき：表示切り替えボタンが次の行へ回ったら、「一段増えた」として画面をその分だけ下げる
+        // （ボタンは画面上の同じ場所に留まり、並びが一段上へ送られる。消して戻るときも同じ）
+        if (atEnd && dy && !isPhone()) {
+          // ページの下が足りず一段分下げられないときは、下に余白を足してから下げる
+          const need = window.scrollY + dy + window.innerHeight;
+          if (dy > 0 && document.documentElement.scrollHeight < need) main.style.minHeight = `${Math.ceil(need)}px`;
+          window.scrollBy(0, dy);
+        }
+        showCaret(atEnd);
+      },
+      // カーソルだけ動いたとき
+      move() { renderCaret(); showCaret(false); },
+      stops: caretStops,
+      vertical: verticalCaret,
+    });
+    // カーソルのあたりが隠れていたら、見える所までスクロール
+    function showCaret(atEnd) {
+      if (isPhone()) {
+        const cell = caretCell();
+        if (cell) reveal(cell.getBoundingClientRect(), 100); // 右下に固定したボタンの分だけ上で止める
+      } else if (atEnd && caretPos === sequence.length) {
+        reveal(controls.getBoundingClientRect(), 24); // 最後に足しているときは、うしろのボタンまで
+      } else {
+        const cell = caretCell();
+        if (cell) reveal(cell.getBoundingClientRect(), 24);
+      }
+    }
+
+    // PC：キャラクター（やリンク・ボタン）以外の場所をクリックすると、そこにカーソルを置いて編集を始める
+    const onBackground = (e) => !e.target.closest('a, button, input');
+    const main = h('main', {
+      class: 'page-grid',
+      onmousedown: (e) => { if (onBackground(e) && document.activeElement === typing.input) e.preventDefault(); }, // 編集中にクリックしても続ける
+      onclick: (e) => {
+        if (isPhone() || !onBackground(e)) return;
+        typing.start(pointToCaret(e.clientX, e.clientY));
+      },
     });
 
     const y = window.scrollY;
-    app.replaceChildren(h('main', { class: 'page-grid' },
+    main.append(
       h('h1', { class: 'visually-hidden' }, 'CHIMERABET'),
       siteHead(logoLink(mode), 'home'),
-      h('div', { class: 'grid' }, cells,
-        modeButtons(mode, { className: 'grid-controls', href: (m) => `#/grid/${m}`, iconChar: BY.A, style: controlInsets(mode) }))));
+      gridEl,
+      typing.input,
+      typing.btn);
+    app.replaceChildren(main);
     window.scrollTo(0, y);
 
     return {
       mode,
-      play() { spinners.forEach((v) => v.start()); },
-      pause() { spinners.forEach((v) => v.pause()); },
-      stop() { spinners.forEach((v) => v.stop()); },
+      play() { playing = true; entries.forEach((e) => e.view && e.view.start()); },
+      pause() { playing = false; entries.forEach((e) => e.view && e.view.pause()); },
+      stop() { playing = false; entries.forEach((e) => e.view && e.view.stop()); },
     };
+  }
+
+  // 画面上の範囲 r が、画面の下（キーボードや固定したボタン）に隠れていたら、見える所までスクロール
+  function reveal(r, margin) {
+    const vv = window.visualViewport;
+    const bottom = (vv ? vv.height + vv.offsetTop : window.innerHeight) - margin;
+    if (r.bottom > bottom) window.scrollBy({ top: r.bottom - bottom, behavior: 'smooth' });
+    else if (r.top < 0) window.scrollBy({ top: r.top - 20, behavior: 'smooth' });
+  }
+
+  /* ---------- ホームの文字の編集 ----------
+     スマホ：左下のキーボードボタンを押すと OS のキーボード（英語配列）が出る
+     PC    ：キャラクター以外の場所をクリックすると、そこにカーソルが置かれ、手元のキーボードで打てる
+     どちらも見えない入力欄で受け取る。英字はカーソルの位置に入り、削除キーでカーソルの前を消す */
+  const isPhone = () => window.matchMedia('(max-width: 600px)').matches; // style.css のスマホの幅と合わせる
+  const onlyLetters = (s) => s.toUpperCase().replace(/[^A-Z]/g, '');
+
+  function makeTyping(hooks) {
+    const input = h('input', {
+      class: 'kb-input',
+      type: 'text',
+      inputmode: 'email', // 日本語キーボードが既定の端末でも、英語配列のキーボードが出る
+      autocomplete: 'off',
+      autocorrect: 'off',
+      autocapitalize: 'characters',
+      spellcheck: 'false',
+      enterkeyhint: 'done',
+      'aria-label': 'ホームに並べる文字（A〜Z）',
+    });
+    const btn = h('button', {
+      type: 'button',
+      class: 'mode-btn kb-btn',
+      title: 'キーボードで文字を消したり足したりする',
+      'aria-label': 'キーボードで文字を消したり足したりする',
+      'aria-pressed': 'false',
+      html: ICON.keyboard,
+      onpointerdown: (e) => e.preventDefault(), // 押したときに入力欄からフォーカスが外れないように
+      onclick: () => { if (document.activeElement === input) input.blur(); else start(); },
+    });
+    const page = () => input.closest('.page-grid');
+
+    // 並びとカーソルを変えて、見えない入力欄の中身・カーソルもそろえる
+    function apply(seq, caret) {
+      const atEnd = caretPos === sequence.length;
+      const changed = seq !== sequence;
+      sequence = seq;
+      caretPos = clamp(caret, 0, seq.length);
+      if (input.value !== seq) input.value = seq;
+      if (document.activeElement === input) input.setSelectionRange(caretPos, caretPos);
+      if (changed) hooks.edit(atEnd);
+      else hooks.move();
+    }
+    function start(caret) {
+      if (caret != null) caretPos = clamp(caret, 0, sequence.length);
+      input.focus({ preventScroll: true });
+      btn.setAttribute('aria-pressed', 'true');
+      page().classList.add('is-editing');
+      apply(sequence, caretPos);
+    }
+    input.addEventListener('focus', () => {
+      btn.setAttribute('aria-pressed', 'true');
+      page().classList.add('is-editing');
+      apply(sequence, caretPos);
+    });
+    input.addEventListener('blur', () => {
+      btn.setAttribute('aria-pressed', 'false');
+      const p = page();
+      if (p) p.classList.remove('is-editing');
+    });
+
+    // PC：押されたキーの位置で判断する（日本語入力がオンでも、A のキーなら A を入れる）
+    let keyAt = 0;
+    input.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        if (!e.isComposing) { e.preventDefault(); input.blur(); }
+        return;
+      }
+      const c = caretPos;
+      const seq = sequence;
+      let next = null;
+      if (e.key === 'Backspace') next = c > 0 ? [seq.slice(0, c - 1) + seq.slice(c), c - 1] : [seq, c];
+      else if (e.key === 'Delete') next = [seq.slice(0, c) + seq.slice(c + 1), c];
+      else if (e.key === 'ArrowLeft') next = [seq, hooks.stops().filter((p) => p < c).pop() ?? c];
+      else if (e.key === 'ArrowRight') next = [seq, hooks.stops().find((p) => p > c) ?? c];
+      else if (e.key === 'ArrowUp') next = [seq, hooks.vertical(-1)];
+      else if (e.key === 'ArrowDown') next = [seq, hooks.vertical(1)];
+      else if (e.key === 'Home') next = [seq, 0];
+      else if (e.key === 'End') next = [seq, seq.length];
+      else {
+        const m = /^Key([A-Z])$/.exec(e.code || '');
+        if (m) next = [seq.slice(0, c) + m[1] + seq.slice(c), c + 1];
+      }
+      if (!next) return; // スマホのキーボードは、ここでは分からないことが多い → 下の input で受け取る
+      e.preventDefault();
+      keyAt = performance.now();
+      apply(next[0], next[1]);
+    });
+
+    // スマホ：入力欄の中身とカーソル位置から、英字だけを取り出す
+    const fromInput = () => {
+      const v = input.value;
+      const sel = input.selectionStart == null ? v.length : input.selectionStart;
+      return [onlyLetters(v), onlyLetters(v.slice(0, sel)).length];
+    };
+    input.addEventListener('input', (e) => {
+      if (performance.now() - keyAt < 80) { apply(sequence, caretPos); return; } // キーで処理した直後（日本語入力の変換などが混ざったもの）は戻す
+      const [seq, caret] = fromInput();
+      if (e.isComposing) { // 変換中の文字はまだ整えない（入力欄には触らない）
+        if (seq !== sequence) {
+          const atEnd = caretPos === sequence.length;
+          sequence = seq;
+          caretPos = caret;
+          hooks.edit(atEnd);
+        }
+        return;
+      }
+      apply(seq, caret);
+    });
+    input.addEventListener('compositionend', () => { const [seq, caret] = fromInput(); apply(seq, caret); });
+    // スマホのキーボードでカーソルを動かしたとき（iPhone のスペースキー長押しなど）
+    onSelectionChange = () => {
+      if (document.activeElement !== input) return;
+      const [seq, caret] = fromInput();
+      if (seq === sequence && caret !== caretPos) { caretPos = caret; hooks.move(); }
+    };
+
+    return { input, btn, start };
+  }
+  // 入力欄のカーソル位置の変化は、いま表示しているホームの入力欄だけに伝える（何度ホームを作り直しても1つだけ）
+  let onSelectionChange = noop;
+  document.addEventListener('selectionchange', () => onSelectionChange());
+
+  // キーボードが出ている間は、画面下に固定したボタンをキーボードの上へ持ち上げる
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const sync = () => root.style.setProperty('--kb-offset', `${Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))}px`);
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
   }
 
   /* ---------- about（別ページ） ---------- */
@@ -637,8 +923,8 @@
     }
     if (popup.view) popup.view.stop();
 
-    const prev = prevOf(c);
-    const next = nextOf(c);
+    const prev = prevOf(c, mode);
+    const next = nextOf(c, mode);
     const go = (ch) => { location.hash = `#/${ch.letter}/${mode}`; };
     const v = makeView(c, mode);
     const stage = h('div', { class: `stage stage-${mode}` }, v.el);
@@ -655,8 +941,11 @@
       stage,
       h('a', { class: 'nav nav-next', href: `#/${next.letter}/${mode}`, 'aria-label': `次へ（${next.letter}）`, html: ICON.chevR }),
       h('footer', { class: 'detail-foot' },
+        // スマホでは × の代わりに、表示切り替えボタンと同じ丸いボタンを左下に出す
+        h('a', { class: 'mode-btn close-round', href: `#/grid/${mode}`, title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }),
         mode === 'turntable' ? h('p', { class: 'hint' }, '長押しで止まる ・ 左右にドラッグで回る') : null,
-        modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c })));
+        // アニメーションがない文字は、アニメーションのボタンを出さない
+        modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })));
     popup.view = v;
     document.title = `${c.letter} ${LABEL[mode]} | CHIMERABET`;
     v.start();
@@ -675,11 +964,12 @@
   }
 
   /* ---------- ルーティング ---------- */
-  let lastMode = 'animation'; // about から戻ったとき、前の表示モードのホームに戻す
+  const DEFAULT_MODE = 'turntable'; // 最初に開いたときの表示
+  let lastMode = DEFAULT_MODE; // about から戻ったとき、前の表示モードのホームに戻す
   function parseRoute() {
     const [a, b] = location.hash.replace(/^#\/?/, '').split('/');
     if (a === 'about') return { view: 'about', mode: lastMode };
-    const mode = MODES.includes(b) ? b : 'animation';
+    const mode = MODES.includes(b) ? b : DEFAULT_MODE;
     const L = (a || '').toUpperCase();
     if (L.length === 1 && BY[L]) return { view: 'detail', letter: L, mode };
     return { view: 'grid', mode };
@@ -689,6 +979,10 @@
   let grid = null;
   function onRoute() {
     route = parseRoute();
+    if (route.mode === 'animation' && (route.view === 'detail' ? !hasMode(BY[route.letter], 'animation') : !ANIM_CHARS.length)) {
+      location.replace(route.view === 'detail' ? `#/${route.letter}/${DEFAULT_MODE}` : `#/grid/${DEFAULT_MODE}`);
+      return;
+    }
     if (route.view === 'about') {
       closePopup();
       if (grid) { grid.stop(); grid = null; }
@@ -714,8 +1008,8 @@
   window.addEventListener('keydown', (e) => {
     if (!route || route.view !== 'detail' || e.metaKey || e.ctrlKey || e.altKey) return;
     const c = BY[route.letter];
-    if (e.key === 'ArrowLeft') location.hash = `#/${prevOf(c).letter}/${route.mode}`;
-    else if (e.key === 'ArrowRight') location.hash = `#/${nextOf(c).letter}/${route.mode}`;
+    if (e.key === 'ArrowLeft') location.hash = `#/${prevOf(c, route.mode).letter}/${route.mode}`;
+    else if (e.key === 'ArrowRight') location.hash = `#/${nextOf(c, route.mode).letter}/${route.mode}`;
     else if (e.key === 'Escape') location.hash = homeHash();
   });
   window.addEventListener('hashchange', onRoute);
