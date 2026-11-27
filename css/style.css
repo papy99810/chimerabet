@@ -235,6 +235,11 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
 .grid-video { inset: 1.5%; overflow: hidden; }
 .grid-video.is-full .media { object-fit: cover; } /* data.js で個別に入れた動画（一覧用がない）は、マスいっぱいに切り抜く */
 .grid-video .media, .tt-detail .media, .view-animation .media { mix-blend-mode: multiply; }
+/* 一覧のアニメーション：キャラクターがマスの左右で切れるので、左右の端をぼかす（白い背景に溶けこませる） */
+.grid-animation .media {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
+}
 
 /* =====================================================================
    個別ページ（ホームの上に重ねるポップアップ）
@@ -301,6 +306,7 @@ html.popup-open { overflow: hidden; }
   /* 右は × と重ならないよう最低 64px */
   padding: clamp(20px, 3.9cqw, 54px) clamp(64px, 6cqw, 96px) 0 clamp(24px, 6cqw, 96px);
 }
+/* 見出し：文字（大）＋今の表示（少し小さく。文字の下の線にそろえる） */
 .detail-title {
   margin: 0;
   font-family: var(--font-title);
@@ -311,6 +317,7 @@ html.popup-open { overflow: hidden; }
   letter-spacing: -.005em;
   color: var(--title, var(--c));
 }
+.detail-title .title-mode { margin-left: .06em; font-size: .75em; }
 
 /* 表示枠：PC ではカードいっぱい（= 動画の外枠） */
 .stage {
@@ -373,7 +380,7 @@ html.popup-open { overflow: hidden; }
   justify-items: center;
   gap: .75em;
   font-family: var(--font-ui);
-  font-size: clamp(11px, 1.35cqw, 16px);
+  font-size: clamp(7px, .67cqw, 8px); /* うんと小さく（目立たせない） */
   line-height: 1;
   color: #1e1e1e;
   white-space: nowrap;
@@ -405,6 +412,9 @@ html.popup-open { overflow: hidden; }
 .mode-btn svg, .mode-btn img { width: 62%; height: 62%; }
 .mode-btn img { object-fit: contain; }
 .mode-btn img.to-white { filter: brightness(0) invert(1); }
+/* この文字にはない表示のボタン（カード）：薄い灰色で、押せない */
+.mode-btn.is-disabled { background: #d6d6d6; cursor: default; }
+.mode-btn.is-disabled:hover { transform: none; }
 
 /* キーボードボタン：スマホ版のホームだけ。表示切り替えボタンと同じ見た目で、左下に固定 */
 .mode-btn.kb-btn {
@@ -456,6 +466,14 @@ html.popup-open { overflow: hidden; }
   pointer-events: none;
 }
 
+/* 指で操作する端末（横向きのスマホ・タブレット）は、幅が広くてもキーボードボタンを出す（左下に固定）
+   最後の行がボタンに隠れないよう、また編集中は最後の行も画面の上までスクロールできるよう、下に余白を足す */
+@media (pointer: coarse) and (min-width: 601px) {
+  .mode-btn.kb-btn { display: grid; }
+  .page-grid { padding-bottom: calc(52px + var(--float-bottom) + 24px); }
+  .page-grid.is-editing { padding-bottom: calc(100svh + env(safe-area-inset-bottom)); }
+}
+
 /* =====================================================================
    スマホ
    ===================================================================== */
@@ -490,8 +508,8 @@ html.popup-open { overflow: hidden; }
      横の動画（縦動画がない文字）は、切れないよう横幅ぴったりのまま */
   .stage .is-vertical .media { object-fit: cover; }
   /* 見出しは左上（右上の閉じるボタンと上下の中心をそろえる） */
-  .detail-head { padding: calc(16px + env(safe-area-inset-top) + (52px - 5cqw) / 2) 80px 0 calc(16px + env(safe-area-inset-left)); }
-  .detail-title { font-size: 5cqw; }
+  .detail-head { padding: calc(16px + env(safe-area-inset-top) + (52px - 10cqw) / 2) 80px 0 calc(16px + env(safe-area-inset-left)); }
+  .detail-title { font-size: 10cqw; }
   /* 閉じるボタン：右上。表示切り替えボタンと同じ大きさ・見た目 */
   .mode-btn.close-round {
     position: absolute;
@@ -522,11 +540,11 @@ html.popup-open { overflow: hidden; }
     z-index: 3;
     translate: -50% 0;
     margin: 0;
-    gap: 7px;
-    font-size: 10px;
+    gap: 4px;
+    font-size: 7px;
   }
   .drag-hint .arrow-pc { display: none; }
-  .drag-hint .arrow-sp { display: block; width: 84px; }
+  .drag-hint .arrow-sp { display: block; width: 58px; }
 
   /* ロゴは1行に収める（画面の幅に合わせて小さくする。6.3 ≒ ロゴの幅 ÷ 文字の大きさ） */
   .logo[data-font="glyph"] { font-size: min(46px, calc((100vw - 110px) / 6.3)); white-space: nowrap; }

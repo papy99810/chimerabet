@@ -335,10 +335,15 @@
     return h('div', { class: 'view view-still' }, img(c.silhouette, 'media'));
   }
 
+  // 縦動画を使うのは、スマホ（幅が狭く、指で操作する端末）のカードだけ。
+  // PC はブラウザの幅を狭めても横の動画。ホームの一覧は、スマホでも横の動画（viewGridAnimation）
+  const VERTICAL_MQ = window.matchMedia('(max-width: 600px) and (pointer: coarse)');
+  const useVertical = () => VERTICAL_MQ.matches;
+
   // アニメーション動画（終わったら最初から繰り返す）。アニメーションがある文字だけで使う
   // スマホでは、縦動画があればそちらを使う（画面いっぱいに表示：.is-vertical）
   function viewAnimation(c) {
-    const vertical = isPhone() && c.animationVertical;
+    const vertical = useVertical() && c.animationVertical;
     const vid = makeVideo(vertical || c.animation, true);
     if (c.animationKeyBlack) vid.classList.add('key-black');
     let started = false;
@@ -463,12 +468,13 @@
   }
 
   // 一覧：アニメーション動画をマスの中で流す（大きさ・位置は一覧のターンテーブルと同じ）
+  // PC・スマホとも横の動画（から切り抜いた正方形）。マスの左右で切れるので、左右の端はぼかす（.grid-animation）
   function viewGridAnimation(c, group) {
     const vid = makeVideo(c.animationGrid || c.animation, true);
     if (c.animationKeyBlack) vid.classList.add('key-black');
     group.add(vid);
     return {
-      el: h('div', { class: `view grid-video${c.animationGrid ? '' : ' is-full'}` }, vid),
+      el: h('div', { class: `view grid-video grid-animation${c.animationGrid ? '' : ' is-full'}` }, vid),
       start: group.start,
       pause: group.pause,
       stop() { group.remove(vid); releaseVideo(vid); },
@@ -483,7 +489,7 @@
       if (isVideoSrc(src)) return spinGridVideo(src, group);
     } else if (isVideoSrc(c.turntable)) {
       // スマホでは、縦動画があればそちらを使う（画面いっぱいに表示：.is-vertical）
-      const vertical = isPhone() && c.turntableVertical;
+      const vertical = useVertical() && c.turntableVertical;
       const v = spinVideo(vertical || c.turntable);
       if (vertical) v.el.classList.add('is-vertical');
       return v;
@@ -708,20 +714,6 @@
     target.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  // スマホ：左右スワイプで前後の文字へ
-  function bindSwipe(target, onLeft, onRight) {
-    let x0 = null;
-    let y0 = 0;
-    target.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') { x0 = e.clientX; y0 = e.clientY; } });
-    target.addEventListener('pointerup', (e) => {
-      if (x0 === null) return;
-      const dx = e.clientX - x0;
-      const dy = e.clientY - y0;
-      x0 = null;
-      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) (dx < 0 ? onLeft : onRight)();
-    });
-  }
-
   /* =====================================================================
      ロゴ（クリックするとホームへ）
      文字はフォントの絵（画像）で表示。どのフォントを使うかは data.js の logoFont
@@ -800,16 +792,20 @@
       if (c.hasSilhouette) return h('img', { src: c.silhouette, alt: '', class: 'to-white', draggable: 'false' });
       return h('img', { src: c.ph.icon, alt: '', draggable: 'false' });
     };
+    // opt.disabled(m) が true のモードは、薄い灰色で出して押せないようにする（カードで、アニメーションがない文字など）
     return h('nav', { class: `modes ${opt.className || ''}`, 'aria-label': '表示の切り替え', style: opt.style || null },
-      (opt.modes || MODES).map((m) =>
-        h('a', {
-          class: `mode-btn mode-${m}`,
-          href: opt.href(m),
-          title: LABEL_JA[m],
-          'aria-label': LABEL_JA[m],
+      (opt.modes || MODES).map((m) => {
+        const off = !!(opt.disabled && opt.disabled(m));
+        return h(off ? 'span' : 'a', {
+          class: `mode-btn mode-${m}${off ? ' is-disabled' : ''}`,
+          href: off ? null : opt.href(m),
+          title: off ? `${LABEL_JA[m]}（この文字にはありません）` : LABEL_JA[m],
+          'aria-label': off ? `${LABEL_JA[m]}（この文字にはありません）` : LABEL_JA[m],
+          'aria-disabled': off ? 'true' : null,
           'aria-current': m === current ? 'true' : null,
           html: m === 'silhouette' ? null : ICON[m],
-        }, m === 'silhouette' ? silIcon() : null)));
+        }, m === 'silhouette' ? silIcon() : null);
+      }));
   }
 
   /* =====================================================================
@@ -1068,7 +1064,8 @@
      スマホ：左下のキーボードボタンを押すと OS のキーボード（英語配列）が出る
      PC    ：キャラクター以外の場所をクリックすると、そこにカーソルが置かれ、手元のキーボードで打てる
      どちらも見えない入力欄で受け取る。英字はカーソルの位置に入り、削除キーでカーソルの前を消す */
-  const isPhone = () => window.matchMedia('(max-width: 600px)').matches; // style.css のスマホの幅と合わせる
+  // 幅が狭い、または指で操作する端末（横向きにしたスマホ・タブレットも）。style.css のキーボードボタンの条件と合わせる
+  const isPhone = () => window.matchMedia('(max-width: 600px), (pointer: coarse)').matches;
   const onlyLetters = (s) => s.toUpperCase().replace(/[^A-Z]/g, '');
 
   function makeTyping(hooks) {
@@ -1249,26 +1246,28 @@
 
     const prev = prevOf(c, mode);
     const next = nextOf(c, mode);
-    const go = (ch) => { location.hash = `#/${ch.letter}/${mode}`; };
     const v = makeView(c, mode);
     const stage = h('div', { class: `stage stage-${mode}` }, v.el);
+    // 前後の文字へは左右の矢印ボタンで移る（カードの上をスワイプしても移らない）
     if (mode === 'turntable') bindHold(stage, v.hold);
-    else bindSwipe(stage, () => go(next), () => go(prev));
 
     popup.panel.style.setProperty('--c', c.color);
     popup.panel.style.setProperty('--title', readable(c.color));
     popup.panel.replaceChildren(
       h('a', { class: 'close-btn', href: homeHash(), title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }),
       h('header', { class: 'detail-head' },
-        h('h1', { class: 'detail-title', id: 'popup-title' }, `${c.letter} ${LABEL[mode]}`)),
+        // 文字＋今の表示（少し小さく、下をそろえる）。例：B turntable
+        h('h1', { class: 'detail-title', id: 'popup-title', 'aria-label': `${c.letter} ${LABEL[mode]}` },
+          h('span', { class: 'title-letter' }, c.letter),
+          h('span', { class: 'title-mode' }, LABEL[mode].toLowerCase()))),
       h('a', { class: 'nav nav-prev', href: `#/${prev.letter}/${mode}`, 'aria-label': `前へ（${prev.letter}）`, html: ICON.chevL }),
       stage,
       h('a', { class: 'nav nav-next', href: `#/${next.letter}/${mode}`, 'aria-label': `次へ（${next.letter}）`, html: ICON.chevR }),
       h('footer', { class: 'detail-foot' },
         // ターンテーブルだけ：カードの下の段の左右中央に「⟷ ドラッグで回転」
         mode === 'turntable' ? h('p', { class: 'drag-hint', html: `${ICON.dragArrow}<span>ドラッグで回転</span>` }) : null,
-        // アニメーションがない文字は、アニメーションのボタンを出さない
-        modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })),
+        // アニメーションがない文字も、アニメーションのボタンは出す（薄い灰色・押せない）
+        modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, disabled: (m) => !hasMode(c, m) })),
       // スマホ：右上に、表示切り替えボタンと同じ丸い閉じるボタン（PC では出さない）
       h('a', { class: 'mode-btn close-round', href: homeHash(), title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }));
     popup.view = v;
@@ -1354,8 +1353,8 @@
     else if (e.key === 'Escape') location.hash = homeHash();
   });
   window.addEventListener('hashchange', onRoute);
-  // スマホ ⇔ PC の幅をまたいだら、開いているカードを作り直す（縦動画 ⇔ 横の動画を切り替える）
-  window.matchMedia('(max-width: 600px)').addEventListener('change', () => { if (popup && route && route.view === 'detail') onRoute(); });
+  // スマホを横向き ⇔ 縦向きにしたときなど、縦動画を使うかが変わったら、開いているカードを作り直す
+  VERTICAL_MQ.addEventListener('change', () => { if (popup && route && route.view === 'detail') onRoute(); });
 
   const favicon = document.querySelector('link[rel="icon"]');
   if (favicon) favicon.href = glyphURL(FRONT_FONT, 'A') || BY.A.ph.illust;
