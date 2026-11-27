@@ -10,7 +10,8 @@
   'use strict';
 
   const CFG = window.CHIMERABET || {};
-  const AS = Object.assign({ fonts: [], metrics: null, mono: {}, animation: {}, turntable: {}, turntableGrid: {} }, window.CHIMERA_ASSETS);
+  const AS = Object.assign({ fonts: [], metrics: null, mono: {}, animation: {}, turntable: {}, turntableGrid: {},
+    animationVertical: {}, turntableVertical: {} }, window.CHIMERA_ASSETS);
   const S = Object.assign({
     secondsPerTurn: 6,
     dragDegPerPx: 0.5,
@@ -261,6 +262,9 @@
       animationGrid: (!a.animation && AS.animationGrid[letter]) || null, // ホーム一覧用（ターンテーブルと同じ切り抜き）
       turntable: a.turntable || AS.turntable[letter] || null,
       turntableGrid: a.turntableGrid || AS.turntableGrid[letter] || null,
+      // スマホ用の縦動画（ある文字だけ。ないときはスマホでも横の動画）
+      animationVertical: a.animationVertical || AS.animationVertical[letter] || null,
+      turntableVertical: a.turntableVertical || AS.turntableVertical[letter] || null,
       hasIllust: !!(a.illust || ILLUST_FONT),
       hasSilhouette: !!(a.silhouette || silGlyph),
     };
@@ -332,8 +336,9 @@
   }
 
   // アニメーション動画（終わったら最初から繰り返す）。アニメーションがある文字だけで使う
+  // スマホでは、縦動画があればそちらを使う
   function viewAnimation(c) {
-    const vid = makeVideo(c.animation, true);
+    const vid = makeVideo((isPhone() && c.animationVertical) || c.animation, true);
     if (c.animationKeyBlack) vid.classList.add('key-black');
     let started = false;
     keepPlaying(vid, () => started);
@@ -476,7 +481,7 @@
       const src = c.turntableGrid || c.turntable;
       if (isVideoSrc(src)) return spinGridVideo(src, group);
     } else if (isVideoSrc(c.turntable)) {
-      return spinVideo(c.turntable);
+      return spinVideo((isPhone() && c.turntableVertical) || c.turntable); // スマホでは、縦動画があればそちらを使う
     }
     return spinLayers(c, ctx);
   }
@@ -1224,8 +1229,7 @@
       const panel = h('section', {
         class: 'popup-panel', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'popup-title', tabindex: '-1',
       });
-      const under = h('div', { class: 'popup-under' }); // スマホ：カードの下に出す閉じるボタン
-      const el = h('div', { class: 'popup' }, panel, under);
+      const el = h('div', { class: 'popup' }, panel);
       // 外側の暗い部分をクリックしてもホームに戻る（中でドラッグして外で離した場合は戻らない）
       let downOnBackdrop = false;
       el.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === el; });
@@ -1233,7 +1237,7 @@
       document.body.append(el);
       root.classList.add('popup-open');
       app.inert = true;
-      popup = { el, panel, under, view: null };
+      popup = { el, panel, view: null };
       panel.focus({ preventScroll: true });
     }
     if (popup.view) popup.view.stop();
@@ -1259,9 +1263,8 @@
         // ターンテーブルだけ：カードの下の段の左右中央に「⟷ ドラッグで回転」
         mode === 'turntable' ? h('p', { class: 'drag-hint', html: `${ICON.dragArrow}<span>ドラッグで回転</span>` }) : null,
         // アニメーションがない文字は、アニメーションのボタンを出さない
-        modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })));
-    // スマホ：カードの外の下（左右中央）に、表示切り替えボタンと同じ丸い閉じるボタン
-    popup.under.replaceChildren(
+        modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })),
+      // スマホ：いちばん下（左右中央）に、表示切り替えボタンと同じ丸い閉じるボタン（PC では出さない）
       h('a', { class: 'mode-btn close-round', href: homeHash(), title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }));
     popup.view = v;
     document.title = `${c.letter} ${LABEL[mode]} | CHIMERABET`;
@@ -1346,6 +1349,8 @@
     else if (e.key === 'Escape') location.hash = homeHash();
   });
   window.addEventListener('hashchange', onRoute);
+  // スマホ ⇔ PC の幅をまたいだら、開いているカードを作り直す（縦動画 ⇔ 横の動画を切り替える）
+  window.matchMedia('(max-width: 600px)').addEventListener('change', () => { if (popup && route && route.view === 'detail') onRoute(); });
 
   const favicon = document.querySelector('link[rel="icon"]');
   if (favicon) favicon.href = glyphURL(FRONT_FONT, 'A') || BY.A.ph.illust;

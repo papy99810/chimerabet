@@ -318,10 +318,13 @@ def main():
         'animationGrid': videos('animation/grid'),
         'turntable': videos('turntable'),
         'turntableGrid': videos('turntable/grid'),
+        # スマホ用の縦動画（ある文字だけ）
+        'animationVertical': videos('animation/vertical'),
+        'turntableVertical': videos('turntable/vertical'),
     }
     # 動画ごとの最初のコマの静止画（読み込み中に先に見せる）
     data['posters'] = {}
-    for kind in ('animation', 'animationGrid', 'turntable', 'turntableGrid'):
+    for kind in ('animation', 'animationGrid', 'turntable', 'turntableGrid', 'animationVertical', 'turntableVertical'):
         for src in data[kind].values():
             jpg = src[:-4] + '.jpg'
             if os.path.exists(os.path.join(site, jpg)):
@@ -336,8 +339,9 @@ def main():
           'window.CHIMERA_ASSETS = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n')
     with open(os.path.join(site, 'js', 'assets.js'), 'w', encoding='utf-8') as fh:
         fh.write(js)
-    print('  js/assets.js（フォント %d・アニメーション %d・ターンテーブル %d）' % (
-        len(fonts), len(data['animation']), len(data['turntable'])))
+    print('  js/assets.js（フォント %d・アニメーション %d・ターンテーブル %d・縦動画 %d）' % (
+        len(fonts), len(data['animation']), len(data['turntable']),
+        len(data['animationVertical']) + len(data['turntableVertical'])))
 
 
 if __name__ == '__main__':

@@ -9,6 +9,8 @@
 //   ・それ以外で先頭が英字の動画 … アニメーション
 //       assets/animation/B.mp4       背景が黒なら白背景に変換
 //       assets/animation/grid/B.mp4  ホーム一覧用（一覧のターンテーブルと同じ切り抜き・大きさ）
+//   ・ファイル名かフォルダ名に「縦」を含む動画 … スマホ用の縦動画（種類の見分け方は上と同じ）
+//       assets/animation/vertical/P.mp4  assets/turntable/vertical/A.mp4（全体を 1080×1920 に縮小）
 //   ・書き出した動画ごとに、最初のコマの静止画（同じ名前の .jpg）も作る（読み込み中に先に見せる）
 // =====================================================================
 import AVFoundation
@@ -25,7 +27,7 @@ let MIN_STEP_DEG = 1.5     // これより細かい角度差のコマは間引�
 let SOURCE_EASE: (Double) -> Double = { u in u * u * (3 - 2 * u) }
 
 struct Out {
-  let crop: CGRect // 元動画上の切り抜き範囲（左上原点・px）。はみ出した部分は白
+  let crop: CGRect // 元動画上の切り抜き範囲（左上原点・px）。はみ出した部分は白。.zero = 元の画面全体
   let width: Int
   let height: Int
   let keyInterval: Int
@@ -39,6 +41,9 @@ let TT_GRID = Out(crop: CGRect(x: 416, y: 129, width: 1088, height: 1088), width
 // ホーム一覧用のアニメーション：一覧のターンテーブルと同じ切り抜き（外枠がそろう）
 let ANIM_GRID = Out(crop: TT_GRID.crop, width: TT_GRID.width, height: TT_GRID.height, keyInterval: 24, quality: TT_GRID.quality)
 let ANIM = Out(crop: CGRect(x: 0, y: 0, width: 1920, height: 1080), width: 1920, height: 1080, keyInterval: 24, quality: 0.78)
+// スマホ用の縦動画：元の画面全体（9:16）を 1080×1920 に縮小（元が 4K でもスマホにはこれで十分）
+let TT_VERTICAL = Out(crop: .zero, width: 1080, height: 1920, keyInterval: TT_DETAIL.keyInterval, quality: TT_DETAIL.quality)
+let ANIM_VERTICAL = Out(crop: .zero, width: 1080, height: 1920, keyInterval: ANIM.keyInterval, quality: ANIM.quality)
 
 let ctx = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
 let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: CGRect(x: -4000, y: -4000, width: 12000, height: 12000))
@@ -160,18 +165,23 @@ final class Writer {
 let VIDEO_FORMAT = 3
 func modified(_ url: URL) -> Date? { (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date }
 var settingsChanged = false // 書き出しの設定が前回と違うか（下で調べる）
-func upToDate(_ src: URL, _ outs: [URL]) -> Bool {
-  if settingsChanged { return false }
+var verticalSettingsChanged = false // 縦動画の設定（別に記録。縦動画を足しても横の動画は書き出し直さない）
+func upToDate(_ src: URL, _ outs: [URL], vertical: Bool) -> Bool {
+  if vertical ? verticalSettingsChanged : settingsChanged { return false }
   let need = modified(src) ?? Date()
   return outs.allSatisfy { (modified($0) ?? .distantPast) > need }
 }
 
 // turntable: true のとき、元のコマ f の角度 = 360 × SOURCE_EASE(f / 最後のコマ番号) として
 // 一定の速さで回るタイミングに置き直す（最後のコマ = 360° = 最初のコマと同じなので使わない）
-func process(_ src: URL, outs: [(URL, Out)], turntable: Bool) {
+func process(_ src: URL, outs rawOuts: [(URL, Out)], turntable: Bool, vertical: Bool = false) {
   let asset = AVURLAsset(url: src)
   guard let track = asset.tracks(withMediaType: .video).first else { fail("映像がありません: \(src.path)") }
   let size = track.naturalSize
+  // 切り抜き .zero = 元の画面全体
+  let outs = rawOuts.map { (url, o) in
+    (url, o.crop == .zero ? Out(crop: CGRect(origin: .zero, size: size), width: o.width, height: o.height, keyInterval: o.keyInterval, quality: o.quality) : o)
+  }
   let fps = Int(round(track.nominalFrameRate > 0 ? track.nominalFrameRate : 24))
   let lastIndex = max(1, Int(round(asset.duration.seconds * Double(fps))) - 1)
   let reader = try! AVAssetReader(asset: asset)
@@ -181,7 +191,7 @@ func process(_ src: URL, outs: [(URL, Out)], turntable: Bool) {
   reader.add(ro)
   reader.startReading()
 
-  let skip = upToDate(src, outs.map { $0.0 })
+  let skip = upToDate(src, outs.map { $0.0 }, vertical: vertical)
   if skip {
     print("  \(src.lastPathComponent) → 変更なし（書き出しは省略）")
     return
@@ -234,8 +244,15 @@ if let old = try? String(contentsOf: settingsURL, encoding: .utf8) {
   settingsChanged = old != settings
   if settingsChanged { print("書き出しの設定が変わったので、動画を全部書き出し直します") }
 }
+let vSettingsURL = outRoot.appendingPathComponent("video-settings-vertical.txt")
+let vSettings = "format \(VIDEO_FORMAT) / turn \(SECONDS_PER_TURN)s step \(MIN_STEP_DEG) / \(TT_VERTICAL) / \(ANIM_VERTICAL)"
+if let old = try? String(contentsOf: vSettingsURL, encoding: .utf8) {
+  verticalSettingsChanged = old != vSettings
+  if verticalSettingsChanged { print("縦動画の書き出しの設定が変わったので、縦動画を全部書き出し直します") }
+}
 try? FileManager.default.createDirectory(at: outRoot, withIntermediateDirectories: true)
 try? settings.write(to: settingsURL, atomically: true, encoding: .utf8)
+try? vSettings.write(to: vSettingsURL, atomically: true, encoding: .utf8)
 
 let files = (FileManager.default.enumerator(at: srcRoot, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? [])
   .filter { ["mp4", "mov", "m4v"].contains($0.pathExtension.lowercased()) }
@@ -243,12 +260,17 @@ let files = (FileManager.default.enumerator(at: srcRoot, includingPropertiesForK
 
 var tt: [String: URL] = [:]
 var anim: [String: URL] = [:]
+var ttV: [String: URL] = [:]   // スマホ用の縦動画
+var animV: [String: URL] = [:]
 for f in files {
   let name = f.deletingPathExtension().lastPathComponent.precomposedStringWithCanonicalMapping
   guard let c = name.first, c.isASCII, c.isLetter else { continue }
   let L = String(c).uppercased()
   if !only.isEmpty && !only.contains(L) { continue }
-  if f.path.precomposedStringWithCanonicalMapping.contains("ターンテーブル") { tt[L] = f } else { anim[L] = f }
+  let path = f.path.precomposedStringWithCanonicalMapping
+  let isTT = path.contains("ターンテーブル")
+  if path.contains("縦") { if isTT { ttV[L] = f } else { animV[L] = f } }
+  else if isTT { tt[L] = f } else { anim[L] = f }
 }
 
 print("ターンテーブル \(tt.count)本")
@@ -262,7 +284,8 @@ for L in tt.keys.sorted() {
 }
 // 素材フォルダから消えた文字の動画（と静止画）は消す（全部の文字を書き出すときだけ）
 if only.isEmpty {
-  for (dir, have) in [("turntable", tt), ("turntable/grid", tt), ("animation", anim), ("animation/grid", anim)] {
+  for (dir, have) in [("turntable", tt), ("turntable/grid", tt), ("animation", anim), ("animation/grid", anim),
+                      ("turntable/vertical", ttV), ("animation/vertical", animV)] {
     let d = outRoot.appendingPathComponent(dir)
     for f in (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? [] where f.hasSuffix(".mp4") || f.hasSuffix(".jpg") {
       if have[String(f.dropLast(4))] == nil {
@@ -280,6 +303,13 @@ for L in anim.keys.sorted() {
       (outRoot.appendingPathComponent("animation/grid/\(L).mp4"), ANIM_GRID),
     ], turntable: false)
   }
+}
+print("スマホ用の縦動画 ターンテーブル \(ttV.count)本・アニメーション \(animV.count)本")
+for L in ttV.keys.sorted() {
+  autoreleasepool { process(ttV[L]!, outs: [(outRoot.appendingPathComponent("turntable/vertical/\(L).mp4"), TT_VERTICAL)], turntable: true, vertical: true) }
+}
+for L in animV.keys.sorted() {
+  autoreleasepool { process(animV[L]!, outs: [(outRoot.appendingPathComponent("animation/vertical/\(L).mp4"), ANIM_VERTICAL)], turntable: false, vertical: true) }
 }
 
 // ---------------------------------------------------------------------
@@ -300,10 +330,11 @@ func writePoster(_ video: URL) -> Bool {
   }
   reader.cancelReading()
   var img = CIImage(cvPixelBuffer: pb)
-  // macOS の JPEG 保存は、大きい画像（1920×1080 など）だと真っ白が 254 になるので、幅 1280 までに縮める
+  // macOS の JPEG 保存は、大きい画像（1920×1080・縦の 1080×1920 など）だと真っ白が 254 になるので、長い辺を 1280 までに縮める
   // （読み込み中に一瞬見せるだけなので、これで十分）
-  if img.extent.width > 1280 {
-    let k = 1280 / img.extent.width
+  let longSide = max(img.extent.width, img.extent.height)
+  if longSide > 1280 {
+    let k = 1280 / longSide
     img = img.clampedToExtent()
       .applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: k, kCIInputAspectRatioKey: 1.0])
       .cropped(to: CGRect(x: 0, y: 0, width: (img.extent.width * k).rounded(), height: (img.extent.height * k).rounded()))
@@ -324,7 +355,7 @@ func writePoster(_ video: URL) -> Bool {
   return CGImageDestinationFinalize(dest)
 }
 var posters = 0
-for dir in ["turntable", "turntable/grid", "animation", "animation/grid"] {
+for dir in ["turntable", "turntable/grid", "animation", "animation/grid", "turntable/vertical", "animation/vertical"] {
   let d = outRoot.appendingPathComponent(dir)
   for f in ((try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? []).sorted() where f.hasSuffix(".mp4") {
     if only.isEmpty || only.contains(String(f.prefix(1))) {
