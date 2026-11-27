@@ -326,6 +326,12 @@ def main():
             jpg = src[:-4] + '.jpg'
             if os.path.exists(os.path.join(site, jpg)):
                 data['posters'][src] = jpg
+    # ファイルの大きさ（ロード画面の進み具合を、実際に届いた量で出すため）
+    data['sizes'] = {}
+    for path in list(data['posters'].keys()) + list(data['posters'].values()) + ['fonts/chimerabet-metrics.otf']:
+        full = os.path.join(site, path)
+        if os.path.exists(full):
+            data['sizes'][path] = os.path.getsize(full)
     js = ('/* 自動生成ファイル（tools/build_fonts.py）。手で書き換えないでください */\n'
           'window.CHIMERA_ASSETS = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n')
     with open(os.path.join(site, 'js', 'assets.js'), 'w', encoding='utf-8') as fh:

@@ -79,6 +79,108 @@
   }
 
   /* =====================================================================
+     ロード画面（読み込み係）
+     最初の画面に必要なもの（静止画・動画・フォント）が、本当に使える状態になったら消す。
+     ・進み具合 = 実際に届いた量（ファイルの大きさで重み付け。大きさは js/assets.js の sizes）
+     ・動画は「止まらずに最後まで再生できる」とブラウザが判断したら完了
+     ・0.3 秒以内に終われば出さない / 一度見えたら最低 0.4 秒は見せる（ちらつき防止）
+     ・15 秒たっても終わらなければ、読み込めた分で表示する（残りは届きしだい表示される）
+     ===================================================================== */
+  const loader = (() => {
+    const el = document.getElementById('loader');
+    const pct = el && el.querySelector('.loader-pct');
+    const t0 = performance.now();
+    const tasks = new Map(); // key → { weight, done: 0〜1 }
+    let collecting = true;   // 最初の画面を作り終えるまで、読み込むものを受け付ける
+    let finished = false;
+    let open;
+    const done = new Promise((r) => { open = r; });
+    const sizeOf = (src) => (AS.sizes || {})[src] || 100000;
+    function add(key, weight) {
+      if (!collecting || tasks.has(key)) return false;
+      tasks.set(key, { weight, done: 0 });
+      return true;
+    }
+    function set(key, f) {
+      const t = tasks.get(key);
+      if (!t || finished) return;
+      t.done = Math.max(t.done, clamp(f, 0, 1));
+      render();
+    }
+    function render() {
+      let all = 0;
+      let got = 0;
+      tasks.forEach((t) => { all += t.weight; got += t.weight * t.done; });
+      const p = all ? got / all : 1;
+      if (el) {
+        el.style.setProperty('--p', `${(p * 100).toFixed(1)}%`);
+        el.setAttribute('aria-valuenow', String(Math.floor(p * 100)));
+        if (pct) pct.textContent = `${Math.floor(p * 100)}%`;
+      }
+      if (!collecting && [...tasks.values()].every((t) => t.done >= 1)) finish();
+    }
+    function finish() {
+      if (finished) return;
+      finished = true;
+      const elapsed = performance.now() - t0;
+      if (elapsed < 300) { open(); if (el) el.remove(); return; } // 見える前に終わった
+      // 見えてから 0.4 秒たつまで待ってから、フェードアウトと同時に画面を動かし始める
+      setTimeout(() => {
+        open();
+        if (!el) return;
+        el.classList.add('is-done');
+        setTimeout(() => el.remove(), 450);
+      }, Math.max(0, 300 + 400 - elapsed));
+    }
+    return {
+      done,
+      get collecting() { return collecting; },
+      get finished() { return finished; },
+      // ロゴ（薄い灰色の上に、進み具合の分だけ色付きのロゴを重ねる）
+      paint() {
+        const box = el && el.querySelector('.loader-logo');
+        if (!box || CFG.logo) return;
+        const base = h('div', { class: 'logo logo-text' });
+        const fill = h('div', { class: 'logo logo-text' });
+        box.append(base, fill);
+        paintLogo(base);
+        paintLogo(fill);
+      },
+      image(src) {
+        if (!src || !add(`img:${src}`, sizeOf(src))) return;
+        const im = new Image();
+        im.onload = im.onerror = () => set(`img:${src}`, 1);
+        im.src = src;
+      },
+      video(v) {
+        const source = v.querySelector('source');
+        const src = source ? source.getAttribute('src') : v.getAttribute('src');
+        const key = `video:${src}:${tasks.size}`;
+        if (!add(key, sizeOf(src))) return;
+        const update = () => {
+          if (v.readyState >= 4) { set(key, 1); return; }
+          const d = v.duration;
+          const b = v.buffered;
+          if (d && isFinite(d) && b.length) set(key, Math.min(0.99, b.end(b.length - 1) / d));
+        };
+        ['loadedmetadata', 'loadeddata', 'progress', 'canplay', 'canplaythrough'].forEach((ev) => v.addEventListener(ev, update));
+        v.addEventListener('error', () => set(key, 1)); // 読み込めなかったものは待たない
+        update();
+      },
+      task(key, weight, promise) {
+        if (!add(key, weight)) return;
+        Promise.resolve(promise).catch(noop).then(() => set(key, 1));
+      },
+      // 最初の画面を作り終えた：ここまでに受け付けたものが全部そろうのを待つ（最長 15 秒）
+      seal() {
+        collecting = false;
+        setTimeout(finish, 15000);
+        render();
+      },
+    };
+  })();
+
+  /* =====================================================================
      フォントの絵（素材フォルダの otf から書き出した各文字の SVG）
      ===================================================================== */
   const FONTS = AS.fonts.map((f) => Object.assign({ dir: `assets/glyphs/${f.id}/` }, f));
@@ -217,7 +319,8 @@
      （最大 8 秒待っても読み込めない動画は、読み込めた時点で、ほかと同じ向き・位置に合わせて動き出す）
      あとから足したマスの動画も、読み込めたらほかと同じ位置に合わせて動き出す。
      動き出したあとは 2 秒ごとに見回って、ずれた動画だけ合わせ直す（読み込み途中で位置合わせが遅れた分なども） */
-  function makeVideoGroup() {
+  // gate：最初のロード画面の完了（このときは「全部そろったら」ではなく、ロード画面が消えるのと同時に動かす）
+  function makeVideoGroup(gate) {
     const items = new Set();
     let live = false;     // 動き出したか
     let active = false;   // 動かしてよいか（個別ページを開いている間は止める）
@@ -259,7 +362,8 @@
         if (Math.min(gap, d - gap) > 0.2) v.currentTime = want;
       });
     }
-    const check = () => { if (!live && items.size && [...items].every(isReady)) goLive(); };
+    const check = () => { if (!gate && !live && items.size && [...items].every(isReady)) goLive(); };
+    if (gate) gate.then(goLive);
     // 動画の読み込みを始める。スマホは再生しないと読み込みを始めないことがあるので、いったん再生してすぐ止める
     // （止める前に動き出してしまったら、ほかと位置を合わせる）
     function load(v) {
@@ -283,6 +387,7 @@
     return {
       add(v) {
         items.add(v);
+        if (loader.collecting) { loader.image(v.getAttribute('poster')); loader.video(v); } // 最初の画面ならロード画面で待つ
         v.addEventListener('canplay', () => {
           if (!live) check();
           else if (!synced.has(v)) join(v); // 遅れて読み込めた動画・あとから足した動画は、ほかと同じ位置から
@@ -307,7 +412,7 @@
           items.forEach((v) => { if (isReady(v)) join(v); });
         } else {
           check();
-          if (!timer) timer = setTimeout(goLive, 8000);
+          if (!gate && !timer) timer = setTimeout(goLive, 8000);
         }
       },
       pause() {
@@ -594,7 +699,9 @@
     return a > 0.3 && a < 2 ? a : ascentEm;
   }
   if (AS.metrics && LOGO_FONT) {
-    new FontFace('ChimerabetMetrics', 'url("fonts/chimerabet-metrics.otf")').load()
+    const metricsFont = new FontFace('ChimerabetMetrics', 'url("fonts/chimerabet-metrics.otf")').load();
+    loader.task('font', (AS.sizes || {})['fonts/chimerabet-metrics.otf'] || 2000, metricsFont);
+    metricsFont
       .then((f) => {
         document.fonts.add(f);
         ascentEm = measureAscent();
@@ -692,7 +799,7 @@
     const gridEl = h('div', { class: 'grid' });
     let entries = []; // { letter, idx（並びの中の位置）, el, view }
     let playing = false;
-    const group = makeVideoGroup(); // 一覧の動画のまとめ役（全部読み込めたら、そろって動かす）
+    const group = makeVideoGroup(loader.collecting ? loader.done : null); // 一覧の動画のまとめ役（全部読み込めたら、そろって動かす）
 
     function makeCell(c) {
       let view = null;
@@ -1086,6 +1193,21 @@
         modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })));
     popup.view = v;
     document.title = `${c.letter} ${LABEL[mode]} | CHIMERABET`;
+    if (loader.collecting) {
+      // 個別ページを直接開いたとき：カードの動画もロード画面で待ち、ロード画面が消えるのと同時に最初から再生する
+      const vid = v.el.querySelector('video');
+      if (vid) {
+        loader.image(vid.getAttribute('poster'));
+        loader.video(vid);
+        vid.play().then(() => { if (!loader.finished) vid.pause(); }).catch(noop); // スマホでも読み込みを始めるため
+      }
+      loader.done.then(() => {
+        if (!popup || popup.view !== v) return;
+        if (vid) { try { vid.currentTime = 0; } catch (e) { /* まだ位置を変えられない */ } }
+        v.start();
+      });
+      return;
+    }
     v.start();
   }
 
@@ -1154,5 +1276,8 @@
 
   const favicon = document.querySelector('link[rel="icon"]');
   if (favicon) favicon.href = glyphURL(FRONT_FONT, 'A') || BY.A.ph.illust;
+  loader.paint();
   onRoute();
+  loader.seal(); // 最初の画面に必要なものを受け付け終わり
+
 })();

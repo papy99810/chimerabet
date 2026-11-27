@@ -17,6 +17,41 @@ img, video { display: block; -webkit-user-drag: none; user-select: none; -webkit
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* =====================================================================
+   ロード画面（index.html の #loader。app.js が進み具合 --p を入れ、終わったら消す）
+   ===================================================================== */
+.loader {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  transition: opacity .4s ease;
+}
+.loader.is-done { opacity: 0; pointer-events: none; }
+/* 中身は 0.3 秒たってから出す（それより早く読み込みが終われば、何も見えないまま消える） */
+.loader-inner { opacity: 0; animation: loader-in .3s ease .3s forwards; }
+@keyframes loader-in { to { opacity: 1; } }
+.loader-logo { position: relative; }
+.loader-logo .logo { display: block; white-space: nowrap; }
+/* 下：薄い灰色のロゴ / 上：届いた量の分だけ左から色付きのロゴ */
+.loader-logo .logo:first-child { filter: grayscale(1); opacity: .16; }
+.loader-logo .logo + .logo {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 calc(100% - var(--p, 0%)) 0 0);
+  transition: clip-path .35s ease;
+}
+.loader-pct {
+  margin: 18px 0 0;
+  text-align: center;
+  color: #b0b0b0;
+  font: 600 12px / 1 var(--font-ui);
+  letter-spacing: .12em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* =====================================================================
    一覧
    ===================================================================== */
 .page-grid, .page-about {
