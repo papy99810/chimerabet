@@ -279,6 +279,11 @@
   const prevOf = (c, mode) => stepOf(c, mode, -1);
   const nextOf = (c, mode) => stepOf(c, mode, 1);
 
+  // 左右矢印（幅 w・高さ h・線の太さ s。矢じりは 45°、端は丸）
+  function arrowSVG(w, h, s, cls) {
+    const r = s / 2, m = h / 2;
+    return `<svg class="${cls}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="M${r} ${m}H${w - r}M${m} ${r} ${r} ${m} ${m} ${h - r}M${w - m} ${r} ${w - r} ${m} ${w - m} ${h - r}" fill="none" stroke="currentColor" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
   const ICON = {
     keyboard: '<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="5.5" y="13" width="37" height="23" rx="4" stroke="#fff" stroke-width="2.8"/><path d="M12 20.2h1.6M18.2 20.2h1.6M24.4 20.2h1.6M30.6 20.2h1.6M36 20.2h.4M12 26.2h1.6M18.2 26.2h1.6M24.4 26.2h1.6M30.6 26.2h1.6M36 26.2h.4M16.5 31h15" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/></svg>',
     animation: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M18 11.8v24.4c0 1.3 1.4 2 2.5 1.3l18.6-12.2a1.5 1.5 0 0 0 0-2.6L20.5 10.5c-1.1-.7-2.5 0-2.5 1.3z" fill="#fff"/></svg>',
@@ -286,8 +291,8 @@
     close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
     chevL: '<svg viewBox="0 0 130 240" aria-hidden="true"><path d="M116 8L16 120l100 112" fill="none" stroke="currentColor" stroke-width="22"/></svg>',
     chevR: '<svg viewBox="0 0 130 240" aria-hidden="true"><path d="M14 8l100 112L14 232" fill="none" stroke="currentColor" stroke-width="22"/></svg>',
-    // ターンテーブルの「ドラッグで回転」の左右矢印（太さ・矢じりの角度はもらった画像に合わせた）
-    dragArrow: '<svg viewBox="0 0 330 54" aria-hidden="true"><path d="M4 27H326M27 4 4 27 27 50M303 4 326 27 303 50" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    // ターンテーブルの「ドラッグで回転」の左右矢印（もらったデザイン画像どおり。PC 用と、少し短いスマホ用）
+    dragArrow: arrowSVG(330, 54, 8, 'arrow-pc') + arrowSVG(231, 52, 7, 'arrow-sp'),
   };
 
   /* ---------- 仮のターンテーブル用の共通タイマー ---------- */
@@ -1212,14 +1217,14 @@
 
   /* ---------- 個別ページ（ポップアップ） ---------- */
   let popup = null; // { el, panel, view }
-  const homeHash = () => `#/grid/${route.mode}`;
+  const homeHash = () => `#/grid/${homeMode}`; // カードを閉じたら、開く前のホームの表示に戻る
 
   function openPopup(c, mode) {
     if (!popup) {
       const panel = h('section', {
         class: 'popup-panel', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'popup-title', tabindex: '-1',
       });
-      const under = h('div', { class: 'popup-under' }); // スマホ：カードの下に出す閉じるボタンと説明
+      const under = h('div', { class: 'popup-under' }); // スマホ：カードの下に出す閉じるボタン
       const el = h('div', { class: 'popup' }, panel, under);
       // 外側の暗い部分をクリックしてもホームに戻る（中でドラッグして外で離した場合は戻らない）
       let downOnBackdrop = false;
@@ -1244,22 +1249,20 @@
     popup.panel.style.setProperty('--c', c.color);
     popup.panel.style.setProperty('--title', readable(c.color));
     popup.panel.replaceChildren(
-      h('a', { class: 'close-btn', href: `#/grid/${mode}`, title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }),
+      h('a', { class: 'close-btn', href: homeHash(), title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }),
       h('header', { class: 'detail-head' },
         h('h1', { class: 'detail-title', id: 'popup-title' }, `${c.letter} ${LABEL[mode]}`)),
       h('a', { class: 'nav nav-prev', href: `#/${prev.letter}/${mode}`, 'aria-label': `前へ（${prev.letter}）`, html: ICON.chevL }),
       stage,
       h('a', { class: 'nav nav-next', href: `#/${next.letter}/${mode}`, 'aria-label': `次へ（${next.letter}）`, html: ICON.chevR }),
       h('footer', { class: 'detail-foot' },
-        // ターンテーブルだけ：カードの下の左右中央に「⟷ ドラッグで回転」（PC。スマホは下の popup.under）
+        // ターンテーブルだけ：カードの下の段の左右中央に「⟷ ドラッグで回転」
         mode === 'turntable' ? h('p', { class: 'drag-hint', html: `${ICON.dragArrow}<span>ドラッグで回転</span>` }) : null,
         // アニメーションがない文字は、アニメーションのボタンを出さない
         modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })));
-    // スマホ：カードの外の下に「⟷ ドラッグで回転」（カードの中はボタンで埋まるので）と、表示切り替えボタンと同じ丸い閉じるボタン
-    popup.under.replaceChildren(...[
-      mode === 'turntable' ? h('p', { class: 'drag-hint', html: `${ICON.dragArrow}<span>ドラッグで回転</span>` }) : null,
-      h('a', { class: 'mode-btn close-round', href: `#/grid/${mode}`, title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }),
-    ].filter(Boolean));
+    // スマホ：カードの外の下（左右中央）に、表示切り替えボタンと同じ丸い閉じるボタン
+    popup.under.replaceChildren(
+      h('a', { class: 'mode-btn close-round', href: homeHash(), title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }));
     popup.view = v;
     document.title = `${c.letter} ${LABEL[mode]} | CHIMERABET`;
     if (loader.collecting) {
@@ -1294,10 +1297,11 @@
 
   /* ---------- ルーティング ---------- */
   const DEFAULT_MODE = 'turntable'; // 最初に開いたときの表示
-  let lastMode = DEFAULT_MODE; // about から戻ったとき、前の表示モードのホームに戻す
+  // ホームの表示モード。ホームのボタンでだけ変わる（カードの中のボタンでは変わらない）。about から戻ったときもこの表示に戻す
+  let homeMode = DEFAULT_MODE;
   function parseRoute() {
     const [a, b] = location.hash.replace(/^#\/?/, '').split('/');
-    if (a === 'about') return { view: 'about', mode: lastMode };
+    if (a === 'about') return { view: 'about', mode: homeMode };
     const mode = MODES.includes(b) ? b : DEFAULT_MODE;
     const L = (a || '').toUpperCase();
     if (L.length === 1 && BY[L]) return { view: 'detail', letter: L, mode };
@@ -1318,11 +1322,11 @@
       renderAbout(route.mode);
       return;
     }
-    lastMode = route.mode;
-    // ホームは表示モードが変わったときだけ作り直す
-    if (!grid || grid.mode !== route.mode) {
+    if (route.view === 'grid') homeMode = route.mode;
+    // ホームは表示モードが変わったときだけ作り直す（カードを開いている間は、ホームはそのまま）
+    if (!grid || grid.mode !== homeMode) {
       if (grid) grid.stop();
-      grid = renderGrid(route.mode);
+      grid = renderGrid(homeMode);
     }
     if (route.view === 'detail') {
       grid.pause(); // ポップアップの後ろでは回さない

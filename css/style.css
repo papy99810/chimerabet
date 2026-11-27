@@ -380,6 +380,7 @@ html.popup-open { overflow: hidden; }
   pointer-events: none; /* 上でドラッグしても回せるように */
 }
 .drag-hint svg { display: block; width: 12em; height: auto; color: #757575; }
+.drag-hint .arrow-sp { display: none; } /* スマホ用の短い矢印 */
 .mode-btn.close-round { display: none; color: #fff; } /* .mode-btn の display より強く */
 .popup-under { display: none; } /* スマホだけ使う（カードの下の閉じるボタン） */
 .close-round svg { width: 42%; height: 42%; }
@@ -483,20 +484,37 @@ html.popup-open { overflow: hidden; }
   /* 編集中は、最後の行も画面の上までスクロールできるよう、下に画面1つ分の余白を足す */
   .page-grid.is-editing { padding-bottom: calc(100svh + env(safe-area-inset-bottom)); }
 
-  /* カードは PC と同じく動画の外枠（16:9）。閉じるボタンは、カードの外の下（.popup-under） */
-  .popup { align-content: center; gap: 18px; }
-  .popup-panel { width: calc(100vw - 24px); height: auto; aspect-ratio: 16 / 9; }
-  /* カードが小さいので、見出しとボタンを小さくして角に寄せる（キャラクターになるべく重ならないように） */
-  .detail-head { padding: 14px 16px 0; }
-  .detail-title { font-size: 24px; }
-  .detail-foot { padding: 0 10px 10px; }
-  .detail-foot .modes { gap: 10px; }
-  .detail-foot .mode-btn { width: 36px; }
-  .popup-under { display: grid; justify-items: center; gap: 14px; }
-  .popup-under .mode-btn { width: 48px; }
-  /* 「⟷ ドラッグで回転」はカードのすぐ下（左右中央）。画像の色のまま見えるよう、カードと同じ白い下地にのせる */
-  .detail-foot .drag-hint { display: none; }
-  .popup-under .drag-hint { grid-column: auto; margin: 0; padding: 10px 20px 11px; border-radius: 14px; background: #fff; font-size: 11px; }
+  /* カード：もらったデザイン画像の比率（cqw = カードの幅の 1%）
+     上は動画の外枠（16:9）、その下に区切り線とボタンの段。閉じるボタンはカードの外の下（.popup-under） */
+  .popup { align-content: center; gap: calc((100vw - 24px) * .029); }
+  .popup-panel { width: calc(100vw - 24px); height: auto; aspect-ratio: 100 / 72.75; }
+  .stage { inset: 0 0 auto; height: 56.25cqw; } /* 動画は上の 16:9 だけ */
+  .nav { top: 28.125cqw; } /* 左右の矢印は動画の上下中央 */
+  .detail-head { padding: 3cqw 3cqw 0; }
+  .detail-title { font-size: 5cqw; }
+  /* 下の段：区切り線の下に、左右中央の「⟷ ドラッグで回転」と右詰めの表示切り替えボタン */
+  .detail-foot { height: 16.5cqw; padding: 2.8cqw 2.8cqw 5.4cqw; gap: 2.9cqw; grid-template-rows: minmax(0, 1fr); } /* 行の高さは固定（表示モードでボタンの位置が変わらない） */
+  .detail-foot::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 8.2cqw;
+    right: 8.2cqw;
+    height: max(2px, .65cqw);
+    translate: 0 -50%;
+    border-radius: 99px;
+    background: #757575;
+  }
+  .detail-foot .modes { gap: 2.9cqw; }
+  .detail-foot .mode-btn { width: 8.25cqw; }
+  .detail-foot .drag-hint { align-self: center; margin: 0; gap: max(4px, 1.8cqw); font-size: 10px; }
+  .drag-hint .arrow-pc { display: none; }
+  .drag-hint .arrow-sp { display: block; width: 21.4cqw; }
+  .popup-under { display: grid; justify-items: center; }
+  .popup-under .mode-btn { width: calc((100vw - 24px) * .0825); } /* カードのボタンと同じ大きさ */
+  /* ボタンが小さいので、押せる範囲だけ見た目より少し広げる */
+  .detail-foot .mode-btn, .popup-under .mode-btn { position: relative; }
+  .detail-foot .mode-btn::after, .popup-under .mode-btn::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; }
 
   /* ロゴは1行に収める（画面の幅に合わせて小さくする。6.3 ≒ ロゴの幅 ÷ 文字の大きさ） */
   .logo[data-font="glyph"] { font-size: min(46px, calc((100vw - 110px) / 6.3)); white-space: nowrap; }
