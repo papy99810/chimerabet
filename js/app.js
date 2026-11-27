@@ -57,8 +57,30 @@
     });
     return v;
   }
+  /* 止まってしまった動画の見回り
+     動いているはずなのに止まっている動画（iPhone で別のアプリから戻ったとき・低電力モード・読み込みの詰まり など）を
+     1.5 秒ごと・ページに戻ってきたとき・画面に触れたときに見つけて、再生し直す */
+  const keepers = new Map(); // video → 動いているべきかを返す関数
+  const keepPlaying = (v, should) => keepers.set(v, { should, last: -1, still: 0 });
+  function patrolVideos() {
+    keepers.forEach((k, v) => {
+      if (!v.isConnected) { keepers.delete(v); return; }
+      if (!k.should() || v.readyState < 2) { k.still = 0; return; }
+      if (v.paused) { v.play().catch(noop); k.still = 0; return; }
+      // 再生中なのに位置が進んでいない（詰まっている）→ 少しだけ位置を動かして再開させる
+      if (v.readyState >= 3 && !v.seeking && Math.abs(v.currentTime - k.last) < 0.001) {
+        if (++k.still >= 2) { try { v.currentTime += 0.04; } catch (e) { /* noop */ } v.play().catch(noop); k.still = 0; }
+      } else k.still = 0;
+      k.last = v.currentTime;
+    });
+  }
+  setInterval(patrolVideos, 1500);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) patrolVideos(); });
+  document.addEventListener('pointerdown', patrolVideos, { capture: true, passive: true }); // 低電力モードでも、触れたときなら再生できる
+
   // 使い終わった動画の読み込みを止めてメモリを空ける
   function releaseVideo(v) {
+    keepers.delete(v);
     v.pause();
     v.querySelectorAll('source').forEach((s) => s.remove());
     v.removeAttribute('src');
@@ -264,6 +286,8 @@
     close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
     chevL: '<svg viewBox="0 0 130 240" aria-hidden="true"><path d="M116 8L16 120l100 112" fill="none" stroke="currentColor" stroke-width="22"/></svg>',
     chevR: '<svg viewBox="0 0 130 240" aria-hidden="true"><path d="M14 8l100 112L14 232" fill="none" stroke="currentColor" stroke-width="22"/></svg>',
+    // ターンテーブルの「ドラッグで回転」の左右矢印（太さ・矢じりの角度はもらった画像に合わせた）
+    dragArrow: '<svg viewBox="0 0 330 54" aria-hidden="true"><path d="M4 27H326M27 4 4 27 27 50M303 4 326 27 303 50" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   };
 
   /* ---------- 仮のターンテーブル用の共通タイマー ---------- */
@@ -306,9 +330,11 @@
   function viewAnimation(c) {
     const vid = makeVideo(c.animation, true);
     if (c.animationKeyBlack) vid.classList.add('key-black');
+    let started = false;
+    keepPlaying(vid, () => started);
     return {
       el: h('div', { class: 'view view-animation' }, vid),
-      start() { vid.currentTime = 0; vid.play().catch(noop); },
+      start() { started = true; vid.currentTime = 0; vid.play().catch(noop); },
       stop() { releaseVideo(vid); },
     };
   }
@@ -387,6 +413,7 @@
     return {
       add(v) {
         items.add(v);
+        keepPlaying(v, () => live && active && synced.has(v));
         if (loader.collecting) { loader.image(v.getAttribute('poster')); loader.video(v); } // 最初の画面ならロード画面で待つ
         v.addEventListener('canplay', () => {
           if (!live) check();
@@ -469,6 +496,7 @@
   function spinVideo(src) {
     const vid = makeVideo(src, true);
     const el = h('div', { class: 'view view-turntable tt-detail' }, vid);
+    keepPlaying(vid, () => active && !manual);
     const period = () => (vid.duration && isFinite(vid.duration) ? vid.duration : S.secondsPerTurn);
     const secPerPx = () => (period() / 360) * S.dragDegPerPx;
 
@@ -661,6 +689,7 @@
     };
     target.addEventListener('pointerup', end);
     target.addEventListener('pointercancel', end);
+    target.addEventListener('lostpointercapture', end); // 通知などで指の追跡が切れたときも
     target.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -941,20 +970,40 @@
       },
       // カーソルだけ動いたとき
       move() { renderCaret(); showCaret(false); },
+      // 編集を始めたとき（スマホ：キーボードが出たら、打つ場所を画面の上へ）
+      opened() {
+        if (!isPhone()) return;
+        setTimeout(() => pinCaret(true), 120);
+        setTimeout(() => pinCaret(true), 480); // キーボードが出きって、見える範囲が決まってからもう一度
+      },
       stops: caretStops,
       vertical: verticalCaret,
     });
     // カーソルのあたりが隠れていたら、見える所までスクロール（最後に足したときは、うしろのボタンまで）
     function showCaret(atEnd) {
       if (isPhone()) {
-        const cell = caretCell();
-        if (cell) reveal(cell.getBoundingClientRect(), 100); // 右下に固定したボタンの分だけ上で止める
+        // カーソルの行が、見えている範囲（キーボードより上）から出たら、また画面の上に合わせる
+        const r = (caretCell() || gridEl).getBoundingClientRect();
+        const vv = window.visualViewport;
+        const top = vv ? vv.offsetTop : 0;
+        const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+        if (r.top < top || r.bottom > bottom - 80) pinCaret(true);
       } else if (atEnd && caretPos === sequence.length) {
         reveal(controls.getBoundingClientRect(), 24); // 最後に足しているときは、うしろのボタンまで
       } else {
         const cell = caretCell();
         if (cell) reveal(cell.getBoundingClientRect(), 24);
       }
+    }
+
+    // スマホ：今打つ場所（カーソルのある行）を、見えている画面の上端に合わせる
+    function pinCaret(smooth) {
+      if (!isPhone() || document.activeElement !== typing.input) return;
+      const r = (caretCell() || gridEl).getBoundingClientRect();
+      const vv = window.visualViewport;
+      const want = 12; // 画面の上端からの余白
+      const dy = r.top - (vv ? vv.offsetTop : 0) - want;
+      if (Math.abs(dy) > 2) window.scrollTo({ top: window.scrollY + dy, behavior: smooth ? 'smooth' : 'auto' });
     }
 
     // PC：キャラクター（やリンク・ボタン）以外の場所をクリックすると、そこにカーソルを置いて編集を始める
@@ -1049,6 +1098,7 @@
       btn.setAttribute('aria-pressed', 'true');
       page().classList.add('is-editing');
       apply(sequence, caretPos);
+      hooks.opened();
     }
     input.addEventListener('focus', () => {
       btn.setAttribute('aria-pressed', 'true');
@@ -1134,6 +1184,19 @@
   }
 
   /* ---------- about（別ページ） ---------- */
+  // 作者（アイコン・名前・SNS）。SNS のアイコンは img/sns の SVG をそのまま使う（入手元とライセンスは img/sns/README.md）
+  function authorBlock(a) {
+    if (!a) return null;
+    return h('section', { class: 'author', 'aria-label': '作者' },
+      a.icon ? h('img', { class: 'author-icon', src: a.icon, alt: '', draggable: 'false' }) : null,
+      h('div', { class: 'author-body' },
+        h('div', { class: 'author-name' }, a.name || ''),
+        (a.links || []).length ? h('ul', { class: 'author-links' },
+          a.links.map((l) => h('li', null,
+            h('a', { class: 'sns', href: l.url, target: '_blank', rel: 'noopener noreferrer', title: l.label, 'aria-label': `${a.name} の ${l.label}（新しいタブで開きます）` },
+              h('img', { src: `img/sns/${l.service}.svg`, alt: '', draggable: 'false' }))))) : null));
+  }
+
   function renderAbout(mode) {
     const about = CFG.about || {};
     app.replaceChildren(h('main', { class: 'page-about' },
@@ -1141,6 +1204,7 @@
       h('article', { class: 'about' },
         h('h1', { class: 'about-title' }, about.title || 'About'),
         (about.body || []).map((text) => h('p', null, text)),
+        authorBlock(about.author),
         h('a', { class: 'back-link', href: `#/grid/${mode}` }, '← ホームへ戻る'))));
     window.scrollTo(0, 0);
     document.title = 'About | CHIMERABET';
@@ -1155,7 +1219,8 @@
       const panel = h('section', {
         class: 'popup-panel', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'popup-title', tabindex: '-1',
       });
-      const el = h('div', { class: 'popup' }, panel);
+      const under = h('div', { class: 'popup-under' }); // スマホ：カードの下に出す閉じるボタンと説明
+      const el = h('div', { class: 'popup' }, panel, under);
       // 外側の暗い部分をクリックしてもホームに戻る（中でドラッグして外で離した場合は戻らない）
       let downOnBackdrop = false;
       el.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === el; });
@@ -1163,7 +1228,7 @@
       document.body.append(el);
       root.classList.add('popup-open');
       app.inert = true;
-      popup = { el, panel, view: null };
+      popup = { el, panel, under, view: null };
       panel.focus({ preventScroll: true });
     }
     if (popup.view) popup.view.stop();
@@ -1186,11 +1251,15 @@
       stage,
       h('a', { class: 'nav nav-next', href: `#/${next.letter}/${mode}`, 'aria-label': `次へ（${next.letter}）`, html: ICON.chevR }),
       h('footer', { class: 'detail-foot' },
-        // スマホでは × の代わりに、表示切り替えボタンと同じ丸いボタンを左下に出す
-        h('a', { class: 'mode-btn close-round', href: `#/grid/${mode}`, title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }),
-        mode === 'turntable' ? h('p', { class: 'hint' }, '長押しで止まる ・ 左右にドラッグで回る') : null,
+        // ターンテーブルだけ：カードの下の左右中央に「⟷ ドラッグで回転」（PC。スマホは下の popup.under）
+        mode === 'turntable' ? h('p', { class: 'drag-hint', html: `${ICON.dragArrow}<span>ドラッグで回転</span>` }) : null,
         // アニメーションがない文字は、アニメーションのボタンを出さない
         modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })));
+    // スマホ：カードの外の下に「⟷ ドラッグで回転」（カードの中はボタンで埋まるので）と、表示切り替えボタンと同じ丸い閉じるボタン
+    popup.under.replaceChildren(...[
+      mode === 'turntable' ? h('p', { class: 'drag-hint', html: `${ICON.dragArrow}<span>ドラッグで回転</span>` }) : null,
+      h('a', { class: 'mode-btn close-round', href: `#/grid/${mode}`, title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }),
+    ].filter(Boolean));
     popup.view = v;
     document.title = `${c.letter} ${LABEL[mode]} | CHIMERABET`;
     if (loader.collecting) {

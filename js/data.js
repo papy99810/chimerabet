@@ -26,13 +26,22 @@ window.CHIMERABET = {
     front: 'Three',           // 正面の絵（タブのアイコンなど）
   },
 
-  // about ページの中身（段落ごとに1行）
+  // about ページの中身
   about: {
     title: 'About',
+    // 説明文（段落ごとに1行）
     body: [
-      'ここに CHIMERABET の紹介文が入ります。',
-      '（制作者・クレジット・お問い合わせ先など）',
+      '正面ではアルファベット、視点を変えれば異形のモンスター。文字と生物の境界を行き来する立体フォント「CHIMERABET」。読むだけで終わらない、“変身する文字”を目指した。',
     ],
+    // 作者（アイコンは img フォルダの画像。SNS のアイコンは img/sns フォルダ。入手元とライセンスは img/sns/README.md）
+    author: {
+      name: 'papy',
+      icon: 'img/S__114450435.jpg',
+      links: [
+        { service: 'instagram', label: 'Instagram', url: 'https://www.instagram.com/papy_99810?evlk=bTgxczFsdXR4ZW5q&utm_source=qr' },
+        { service: 'x', label: 'X', url: 'https://x.com/Papipurio0905' },
+      ],
+    },
   },
 
   // 各文字の色（シルエットの色・詳細ページの見出しの色）
