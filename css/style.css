@@ -232,11 +232,14 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
 .tt-layer { position: absolute; inset: 0; transform: translateZ(calc(var(--z) * var(--gap, 1px))); }
 /* 動画（背景は白。万一わずかに白からずれても目立たないよう乗算で重ねる）
    一覧のターンテーブル・アニメーションは同じ外枠。フォントの絵と足元・大きさがそろうよう、マスより少し大きく置く */
-.grid-video { inset: 1.5%; overflow: hidden; }
-.grid-video.is-full .media { object-fit: cover; } /* data.js で個別に入れた動画（一覧用がない）は、マスいっぱいに切り抜く */
-.grid-video .media, .tt-detail .media, .view-animation .media { mix-blend-mode: multiply; }
-/* 一覧のアニメーション：キャラクターがマスの左右で切れるので、左右の端をぼかす（白い背景に溶けこませる） */
-.grid-animation .media {
+/* 一覧のマス：後ろに最初のコマの静止画（app.js の gridVideoBox）。動画の映像が一瞬なくなっても、キャラクターが消えない
+   （静止画が透けないよう、一覧の動画は乗算にせず、そのまま上に重ねる。背景が白なので見た目は同じ） */
+.grid-video { inset: 1.5%; overflow: hidden; background: center / contain no-repeat; }
+.grid-video.is-full, .grid-video.is-full .media { background-size: cover; object-fit: cover; } /* data.js で個別に入れた動画（一覧用がない）は、マスいっぱいに切り抜く */
+.tt-detail .media, .view-animation .media { mix-blend-mode: multiply; }
+/* 一覧のアニメーション：キャラクターがマスの左右で切れるので、左右の端をぼかす（白い背景に溶けこませる）
+   後ろの静止画ごとぼかす */
+.grid-animation {
   -webkit-mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
   mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
 }

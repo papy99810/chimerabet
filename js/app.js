@@ -79,6 +79,16 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) patrolVideos(); });
   document.addEventListener('pointerdown', patrolVideos, { capture: true, passive: true }); // 低電力モードでも、触れたときなら再生できる
 
+  // 一覧のマス：動画の後ろに、最初のコマの静止画を敷く
+  // （スマホはスクロールで画面の外に出た動画の映像を一度捨てることがあり、戻ったとき一瞬マスが空になるため。
+  //   そのあいだも、キャラクターが消えずに静止画が見える）
+  function gridVideoBox(cls, vid) {
+    const el = h('div', { class: cls }, vid);
+    const poster = vid.getAttribute('poster');
+    if (poster) el.style.backgroundImage = `url("${poster}")`;
+    return el;
+  }
+
   // 使い終わった動画の読み込みを止めてメモリを空ける
   function releaseVideo(v) {
     keepers.delete(v);
@@ -474,7 +484,7 @@
     if (c.animationKeyBlack) vid.classList.add('key-black');
     group.add(vid);
     return {
-      el: h('div', { class: `view grid-video grid-animation${c.animationGrid ? '' : ' is-full'}` }, vid),
+      el: gridVideoBox(`view grid-video grid-animation${c.animationGrid ? '' : ' is-full'}`, vid),
       start: group.start,
       pause: group.pause,
       stop() { group.remove(vid); releaseVideo(vid); },
@@ -502,7 +512,7 @@
     const vid = makeVideo(src, true);
     group.add(vid);
     return {
-      el: h('div', { class: 'view view-turntable grid-video' }, vid),
+      el: gridVideoBox('view view-turntable grid-video', vid),
       start: group.start,
       pause: group.pause,
       stop() { group.remove(vid); releaseVideo(vid); },
