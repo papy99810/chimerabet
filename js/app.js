@@ -336,14 +336,15 @@
   }
 
   // アニメーション動画（終わったら最初から繰り返す）。アニメーションがある文字だけで使う
-  // スマホでは、縦動画があればそちらを使う
+  // スマホでは、縦動画があればそちらを使う（画面いっぱいに表示：.is-vertical）
   function viewAnimation(c) {
-    const vid = makeVideo((isPhone() && c.animationVertical) || c.animation, true);
+    const vertical = isPhone() && c.animationVertical;
+    const vid = makeVideo(vertical || c.animation, true);
     if (c.animationKeyBlack) vid.classList.add('key-black');
     let started = false;
     keepPlaying(vid, () => started);
     return {
-      el: h('div', { class: 'view view-animation' }, vid),
+      el: h('div', { class: `view view-animation${vertical ? ' is-vertical' : ''}` }, vid),
       start() { started = true; vid.currentTime = 0; vid.play().catch(noop); },
       stop() { releaseVideo(vid); },
     };
@@ -481,7 +482,11 @@
       const src = c.turntableGrid || c.turntable;
       if (isVideoSrc(src)) return spinGridVideo(src, group);
     } else if (isVideoSrc(c.turntable)) {
-      return spinVideo((isPhone() && c.turntableVertical) || c.turntable); // スマホでは、縦動画があればそちらを使う
+      // スマホでは、縦動画があればそちらを使う（画面いっぱいに表示：.is-vertical）
+      const vertical = isPhone() && c.turntableVertical;
+      const v = spinVideo(vertical || c.turntable);
+      if (vertical) v.el.classList.add('is-vertical');
+      return v;
     }
     return spinLayers(c, ctx);
   }
@@ -1264,7 +1269,7 @@
         mode === 'turntable' ? h('p', { class: 'drag-hint', html: `${ICON.dragArrow}<span>ドラッグで回転</span>` }) : null,
         // アニメーションがない文字は、アニメーションのボタンを出さない
         modeButtons(mode, { href: (m) => `#/${c.letter}/${m}`, iconChar: c, modes: MODES.filter((m) => hasMode(c, m)) })),
-      // スマホ：いちばん下（左右中央）に、表示切り替えボタンと同じ丸い閉じるボタン（PC では出さない）
+      // スマホ：右上に、表示切り替えボタンと同じ丸い閉じるボタン（PC では出さない）
       h('a', { class: 'mode-btn close-round', href: homeHash(), title: '閉じる（ホームに戻る）', 'aria-label': '閉じてホームに戻る', html: ICON.close }));
     popup.view = v;
     document.title = `${c.letter} ${LABEL[mode]} | CHIMERABET`;

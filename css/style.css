@@ -460,7 +460,7 @@ html.popup-open { overflow: hidden; }
    スマホ
    ===================================================================== */
 @media (max-width: 600px) {
-  /* 個別ページ：× は、カードの外の下（左右中央）の丸いボタンに（表示切り替えボタンと同じ見た目） */
+  /* 個別ページ：× は、右上の丸いボタンに（表示切り替えボタンと同じ見た目） */
   .close-btn { display: none; }
   .mode-btn.close-round { display: grid; }
   .mode-btn.kb-btn { display: grid; }
@@ -483,45 +483,50 @@ html.popup-open { overflow: hidden; }
   /* 編集中は、最後の行も画面の上までスクロールできるよう、下に画面1つ分の余白を足す */
   .page-grid.is-editing { padding-bottom: calc(100svh + env(safe-area-inset-bottom)); }
 
-  /* カード：画面いっぱい（cqw = 画面の幅の 1%。各部の比率は、もらったデザイン画像のまま）
-     上から 見出し（動画に重ねる）・動画・区切り線とボタンの段・閉じるボタン
-     --sp-bottom = 下の段 16.5 + 閉じるボタン（上のすき間 2.9・ボタン 8.25・下の余白 4）。動画はその上の全部 */
+  /* カード：画面いっぱい。動画（表示枠）を画面全体に敷き、その上に見出し・閉じるボタン・表示切り替えボタンを重ねる */
   .popup { place-items: stretch; }
-  .popup-panel {
-    --sp-bottom: calc(31.65cqw + env(safe-area-inset-bottom));
-    width: auto;
-    height: auto;
-    aspect-ratio: auto;
-    border-radius: 0;
-    box-shadow: none;
-    grid-template-rows: auto 1fr auto auto;
-  }
-  .stage { inset: 0 0 var(--sp-bottom); } /* 縦動画（9:16）がちょうど収まるくらいの縦長 */
-  .nav { top: calc((100% - var(--sp-bottom)) / 2); } /* 左右の矢印は動画の上下中央 */
-  .detail-head { padding: calc(3cqw + env(safe-area-inset-top)) 3cqw 0; }
+  .popup-panel { width: auto; height: auto; aspect-ratio: auto; border-radius: 0; box-shadow: none; }
+  /* 縦動画は画面いっぱい（縦か横のどちらかがぴったり合うまで広げ、はみ出した分は切る）
+     横の動画（縦動画がない文字）は、切れないよう横幅ぴったりのまま */
+  .stage .is-vertical .media { object-fit: cover; }
+  /* 見出しは左上（右上の閉じるボタンと上下の中心をそろえる） */
+  .detail-head { padding: calc(16px + env(safe-area-inset-top) + (52px - 5cqw) / 2) 80px 0 calc(16px + env(safe-area-inset-left)); }
   .detail-title { font-size: 5cqw; }
-  /* 下の段：区切り線の下に、左右中央の「⟷ ドラッグで回転」と右詰めの表示切り替えボタン */
-  .detail-foot { height: 16.5cqw; padding: 2.8cqw 2.8cqw 5.4cqw; gap: 2.9cqw; grid-template-rows: minmax(0, 1fr); } /* 行の高さは固定（表示モードでボタンの位置が変わらない） */
-  .detail-foot::before {
-    content: "";
+  /* 閉じるボタン：右上。表示切り替えボタンと同じ大きさ・見た目 */
+  .mode-btn.close-round {
     position: absolute;
-    top: 0;
-    left: 8.2cqw;
-    right: 8.2cqw;
-    height: max(2px, .65cqw);
-    translate: 0 -50%;
-    border-radius: 99px;
-    background: #757575;
+    top: calc(16px + env(safe-area-inset-top));
+    right: calc(16px + env(safe-area-inset-right));
+    z-index: 4;
+    width: 52px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
   }
-  .detail-foot .modes { gap: 2.9cqw; }
-  .detail-foot .mode-btn { width: 8.25cqw; }
-  .detail-foot .drag-hint { align-self: center; margin: 0; gap: max(4px, 1.8cqw); font-size: 10px; }
+  /* 表示切り替えボタン：ホーム画面と同じ大きさ・同じ位置（右下） */
+  /* （PC 用の「3列の何列目」の指定は外す。残すと、画面全体に対する位置がずれる） */
+  .detail-foot { position: static; }
+  .detail-foot .modes, .detail-foot .drag-hint { grid-column: auto; }
+  .detail-foot .modes {
+    position: absolute;
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: var(--float-bottom);
+    z-index: 3;
+    gap: 12px;
+  }
+  .detail-foot .mode-btn { width: 52px; box-shadow: 0 4px 14px rgba(0, 0, 0, .22); }
+  .detail-foot .mode-btn[aria-current="true"] { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--btn), 0 4px 14px rgba(0, 0, 0, .22); }
+  /* 「⟷ ドラッグで回転」：左右中央。右下のボタンと重ならないよう、ボタンの段のすぐ上 */
+  .detail-foot .drag-hint {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--float-bottom) + 52px + 14px);
+    z-index: 3;
+    translate: -50% 0;
+    margin: 0;
+    gap: 7px;
+    font-size: 10px;
+  }
   .drag-hint .arrow-pc { display: none; }
-  .drag-hint .arrow-sp { display: block; width: 21.4cqw; }
-  .mode-btn.close-round { grid-row: 4; justify-self: center; z-index: 2; width: 8.25cqw; margin: 2.9cqw 0 calc(4cqw + env(safe-area-inset-bottom)); }
-  /* ボタンが小さいので、押せる範囲だけ見た目より少し広げる */
-  .detail-foot .mode-btn, .mode-btn.close-round { position: relative; }
-  .detail-foot .mode-btn::after, .mode-btn.close-round::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; }
+  .drag-hint .arrow-sp { display: block; width: 84px; }
 
   /* ロゴは1行に収める（画面の幅に合わせて小さくする。6.3 ≒ ロゴの幅 ÷ 文字の大きさ） */
   .logo[data-font="glyph"] { font-size: min(46px, calc((100vw - 110px) / 6.3)); white-space: nowrap; }
