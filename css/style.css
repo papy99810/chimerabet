@@ -478,9 +478,10 @@ html.popup-open { overflow: hidden; }
 }
 
 /* =====================================================================
-   スマホ
+   スマホ（縦向き = 幅 600px 以下 / 横向き = 指で操作する端末で、画面の高さが 600px 以下）
+   ホームの表示切り替えボタンの固定・全画面のカードなど。PC・タブレットは今までどおり
    ===================================================================== */
-@media (max-width: 600px) {
+@media (max-width: 600px), (pointer: coarse) and (max-height: 600px) {
   /* 個別ページ：× は、右上の丸いボタンに（表示切り替えボタンと同じ見た目） */
   .close-btn { display: none; }
   .mode-btn.close-round { display: grid; }
@@ -511,8 +512,9 @@ html.popup-open { overflow: hidden; }
      横の動画（縦動画がない文字）は、切れないよう横幅ぴったりのまま */
   .stage .is-vertical .media { object-fit: cover; }
   /* 見出しは左上（右上の閉じるボタンと上下の中心をそろえる） */
-  .detail-head { padding: calc(16px + env(safe-area-inset-top) + (52px - 10cqw) / 2) 80px 0 calc(16px + env(safe-area-inset-left)); }
-  .detail-title { font-size: 10cqw; }
+  /* 大きさは画面の短いほうの辺の 10%（縦向きでも横向きでも同じ大きさ） */
+  .detail-head { padding: calc(16px + env(safe-area-inset-top) + (52px - 10cqmin) / 2) 80px 0 calc(16px + env(safe-area-inset-left)); }
+  .detail-title { font-size: 10cqmin; }
   /* 閉じるボタン：右上。表示切り替えボタンと同じ大きさ・見た目 */
   .mode-btn.close-round {
     position: absolute;
@@ -548,7 +550,16 @@ html.popup-open { overflow: hidden; }
   }
   .drag-hint .arrow-pc { display: none; }
   .drag-hint .arrow-sp { display: block; width: 58px; }
+}
 
+/* スマホを横向きにしたとき：画面が低いので、「⟷ ドラッグで回転」は画面の下端（キャラクターの足元より下）に
+   （横に広いので、右下のボタンとは重ならない） */
+@media (pointer: coarse) and (max-height: 600px) and (min-width: 601px) {
+  .detail-foot .drag-hint { bottom: calc(env(safe-area-inset-bottom) + 8px); }
+}
+
+/* スマホ（縦向き）だけ */
+@media (max-width: 600px) {
   /* ロゴは1行に収める（画面の幅に合わせて小さくする。6.3 ≒ ロゴの幅 ÷ 文字の大きさ） */
   .logo[data-font="glyph"] { font-size: min(46px, calc((100vw - 110px) / 6.3)); white-space: nowrap; }
 
