@@ -124,6 +124,8 @@ html:not(.metrics-ready) .logo[data-font="glyph"] { opacity: 0; } /* 字送り�
   transition: opacity .2s ease;
 }
 .cell:hover { opacity: .7; }
+/* 指で操作する端末：編集中のタップはカーソルを動かすだけなので、タップしたキャラクターを薄くしない（タップのあとも薄いまま残るため） */
+@media (hover: none) { .page-grid.is-editing .cell:hover { opacity: 1; } }
 .cell:focus-visible { outline: 3px solid var(--c); }
 
 /* PC：表示切り替えボタンは、一覧の最後の行の右側2マス分（T・U の列）に置く

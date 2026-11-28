@@ -58,6 +58,19 @@
     });
     return v;
   }
+  /* 再生位置を飛ばす（iPhone 対策）
+     iPhone（Safari・Chrome とも）は、再生中や再生を始める直前に位置を飛ばすと、そのあと絵が止まったまま
+     （次のループで最初に戻るまで、最大 5 秒ほど）になることがある。
+     なので、いったん止めてから飛ばし、飛び終わってから after()（ふつうは再生）を呼ぶ */
+  function seekThen(v, t, after) {
+    let done = false;
+    const go = () => { if (done) return; done = true; clearTimeout(timer); after(); };
+    const timer = setTimeout(go, 1000); // 飛び終わりの知らせが来なくても進める
+    v.pause();
+    v.addEventListener('seeked', go, { once: true });
+    try { v.currentTime = t; } catch (e) { go(); }
+  }
+
   /* 止まってしまった動画の見回り
      動いているはずなのに止まっている動画（iPhone で別のアプリから戻ったとき・低電力モード・読み込みの詰まり など）を
      1.5 秒ごと・ページに戻ってきたとき・画面に触れたときに見つけて、再生し直す */
@@ -70,7 +83,7 @@
       if (v.paused) { v.play().catch(noop); k.still = 0; return; }
       // 再生中なのに位置が進んでいない（詰まっている）→ 少しだけ位置を動かして再開させる
       if (v.readyState >= 3 && !v.seeking && Math.abs(v.currentTime - k.last) < 0.001) {
-        if (++k.still >= 2) { try { v.currentTime += 0.04; } catch (e) { /* noop */ } v.play().catch(noop); k.still = 0; }
+        if (++k.still >= 2) { seekThen(v, v.currentTime + 0.04, () => { if (k.should()) v.play().catch(noop); }); k.still = 0; }
       } else k.still = 0;
       k.last = v.currentTime;
     });
@@ -360,8 +373,12 @@
     keepPlaying(vid, () => started);
     return {
       el: h('div', { class: `view view-animation${vertical ? ' is-vertical' : ''}` }, vid),
-      start() { started = true; vid.currentTime = 0; vid.play().catch(noop); },
-      stop() { releaseVideo(vid); },
+      start() {
+        started = true;
+        if (vid.currentTime > 0.05) seekThen(vid, 0, () => { if (started) vid.play().catch(noop); }); // 最初から
+        else vid.play().catch(noop);
+      },
+      stop() { started = false; releaseVideo(vid); },
     };
   }
 
@@ -370,7 +387,11 @@
      全部の動画が読み込めたら、そろって最初から動かす。
      （最大 8 秒待っても読み込めない動画は、読み込めた時点で、ほかと同じ向き・位置に合わせて動き出す）
      あとから足したマスの動画も、読み込めたらほかと同じ位置に合わせて動き出す。
-     動き出したあとは 2 秒ごとに見回って、ずれた動画だけ合わせ直す（読み込み途中で位置合わせが遅れた分なども） */
+     動き出したあとは 2 秒ごとに見回って、ずれた動画だけ合わせ直す（読み込み途中で位置合わせが遅れた分なども）
+     iPhone は再生中に位置を飛ばすと絵が止まってしまうので、合わせ直しはなるべく飛ばさない：
+       ・全員そろって遅れている分（iPhone はループの切れ目で少しずつ遅れる）は、基準の時計のほうを動画に合わせる
+       ・1本だけのずれは、再生の速さを少し変えて 2 秒かけて追いつかせる
+       ・大きくずれたときだけ、いったん止めて飛ばす（seekThen） */
   // gate：最初のロード画面の完了（このときは「全部そろったら」ではなく、ロード画面が消えるのと同時に動かす）
   function makeVideoGroup(gate) {
     const items = new Set();
@@ -386,11 +407,18 @@
     const isReady = (v) => v.readyState >= 3;
     const synced = new WeakSet(); // 動き出したあと、ほかと位置を合わせた動画
     const elapsed = () => ((pausedAt == null ? performance.now() : pausedAt) - t0) / 1000;
+    const lenOf = (v) => (v.duration && isFinite(v.duration) ? v.duration : 0);
+    // 本来の位置からのずれ（秒。+ = 進みすぎ / − = 遅れ。ループの切れ目をまたぐずれも考える）
+    const lagOf = (v) => { const d = lenOf(v); return d ? mod(v.currentTime - elapsed() + d / 2, d) - d / 2 : 0; };
     function join(v) {
-      const d = v.duration;
-      try { v.currentTime = d && isFinite(d) ? elapsed() % d : 0; } catch (e) { /* まだ位置を変えられない */ }
+      const d = lenOf(v);
       synced.add(v);
-      if (active) v.play().catch(noop);
+      v.playbackRate = 1;
+      const play = () => { if (active && synced.has(v)) v.play().catch(noop); };
+      if (d && Math.abs(lagOf(v)) > 0.15) {
+        if (active) seekThen(v, mod(elapsed(), d), play);
+        else { v.pause(); try { v.currentTime = mod(elapsed(), d); } catch (e) { /* まだ位置を変えられない */ } }
+      } else if (active) play();
       else v.pause();
     }
     function goLive() {
@@ -402,16 +430,18 @@
       items.forEach((v) => { if (isReady(v)) join(v); });
       patrol = setInterval(resync, 2000);
     }
-    // 本来の位置から 0.2 秒以上ずれている動画だけ合わせ直す（ループの切れ目をまたぐずれも考える）
     function resync() {
       if (!items.size) { clearInterval(patrol); return; }
       if (!active) return;
-      items.forEach((v) => {
-        const d = v.duration;
-        if (!synced.has(v) || v.paused || v.seeking || !isReady(v) || !d || !isFinite(d)) return;
-        const want = elapsed() % d;
-        const gap = Math.abs(v.currentTime - want);
-        if (Math.min(gap, d - gap) > 0.2) v.currentTime = want;
+      const list = [...items].filter((v) => synced.has(v) && !v.paused && !v.seeking && isReady(v) && lenOf(v));
+      if (!list.length) return;
+      // 全員そろったずれ（真ん中の値）は、基準の時計のほうを合わせる（動画は飛ばさない）
+      const lags = list.map(lagOf).sort((a, b) => a - b);
+      t0 -= lags[lags.length >> 1] * 1000;
+      list.forEach((v) => {
+        const lag = lagOf(v);
+        if (Math.abs(lag) > 1.5) { v.playbackRate = 1; seekThen(v, mod(elapsed(), lenOf(v)), () => { if (active) v.play().catch(noop); }); }
+        else v.playbackRate = Math.abs(lag) > 0.05 ? clamp(1 - lag / 2, 0.6, 1.4) : 1; // 2 秒かけて追いつく
       });
     }
     const check = () => { if (!gate && !live && items.size && [...items].every(isReady)) goLive(); };
@@ -472,7 +502,7 @@
         if (!active) return;
         active = false;
         if (live) pausedAt = performance.now();
-        items.forEach((v) => v.pause());
+        items.forEach((v) => { v.pause(); v.playbackRate = 1; });
       },
     };
   }
@@ -571,8 +601,10 @@
           manual = false;
           pending = null;
           shown = -1;
-          if (vid.readyState >= 1) vid.currentTime = mod(pos, period());
-          if (active) vid.play().catch(noop);
+          // 今の向きへ飛ばしてから再生（飛び終わる前に再生すると、iPhone で絵が止まったままになることがある）
+          const resume = () => { if (active && !manual) vid.play().catch(noop); };
+          if (vid.readyState >= 1) seekThen(vid, mod(pos, period()), resume);
+          else resume();
           return;
         }
       }
@@ -1028,11 +1060,29 @@
     }
 
     // PC：キャラクター（やリンク・ボタン）以外の場所をクリックすると、そこにカーソルを置いて編集を始める
+    // スマホ：キーボードを出して編集している間は、タップした所（キャラクターの上でも）へカーソルを動かす。カードは開かない
+    //        （ロゴ・about・ボタンは、いつもどおり）
     const onBackground = (e) => !e.target.closest('a, button, input');
+    const onGridOrBackground = (e) => !e.target.closest('a:not(.cell), button, input');
+    const editingNow = () => document.activeElement === typing.input;
+    let tapWhileEditing = false; // 指が触れた時点で編集中だったか（触れたことで入力欄から外れても分かるように）
     const main = h('main', {
       class: 'page-grid',
-      onmousedown: (e) => { if (onBackground(e) && document.activeElement === typing.input) e.preventDefault(); }, // 編集中にクリックしても続ける
+      onpointerdown: (e) => {
+        tapWhileEditing = isPhone() && editingNow() && onGridOrBackground(e);
+        if (tapWhileEditing) e.preventDefault(); // タップでキーボードが閉じないように（スクロールはできる）
+      },
+      onmousedown: (e) => { if ((onBackground(e) || tapWhileEditing) && editingNow()) e.preventDefault(); }, // 編集中にクリックしても続ける
       onclick: (e) => {
+        if (tapWhileEditing) {
+          tapWhileEditing = false;
+          if (!onGridOrBackground(e)) return;
+          e.preventDefault(); // キャラクターをタップしても、カードは開かない
+          const caret = pointToCaret(e.clientX, e.clientY);
+          if (editingNow()) typing.moveTo(caret);
+          else typing.start(caret); // タップで入力欄から外れてしまった端末では、キーボードを出し直す
+          return;
+        }
         if (isPhone() || !onBackground(e)) return;
         typing.start(pointToCaret(e.clientX, e.clientY));
       },
@@ -1191,7 +1241,10 @@
       if (seq === sequence && caret !== caretPos) { caretPos = caret; hooks.move(); }
     };
 
-    return { input, btn, start };
+    // 編集中にカーソルだけ動かす（スマホのタップ）
+    function moveTo(caret) { apply(sequence, caret); }
+
+    return { input, btn, start, moveTo };
   }
   // 入力欄のカーソル位置の変化は、いま表示しているホームの入力欄だけに伝える（何度ホームを作り直しても1つだけ）
   let onSelectionChange = noop;
