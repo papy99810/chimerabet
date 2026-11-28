@@ -1250,59 +1250,48 @@
   let onSelectionChange = noop;
   document.addEventListener('selectionchange', () => onSelectionChange());
 
+  /* 純正のキーボードが出ているか（スマホ）
+     ・出ている間は、キーボードボタンを隠す（html に kb-shown。閉じたら戻る）
+     ・閉じられたら、編集を終える（キーボードボタンの押された状態も外れる）。Android の戻るボタンやキーボードの「閉じる」などでは、
+       キーボードが消えても入力欄に入ったままのことがあるため
+     見えている画面の高さで判断する：キーボードがないときの高さより 120px 以上低くなったら「出ている」、
+     そのあと差が 60px 未満に戻ったら「閉じた」。外付けキーボードなどで純正のキーボードが出ないときは、何もしない */
   if (window.visualViewport) {
     const vv = window.visualViewport;
-
-    /* 純正のキーボードが閉じられたら、編集を終える（キーボードボタンの押された状態も外れる）
-       Android の戻るボタンやキーボードの「閉じる」などでは、キーボードが消えても入力欄に入ったままのことがあるため。
-       見えている画面の高さで判断する：編集を始めてから一番高かったとき（キーボードなし）より
-       120px 以上低くなったら「キーボードが出ている」、そのあと差が 60px 未満に戻ったら「閉じた」 */
     const isTypingInput = (el) => !!(el && el.classList && el.classList.contains('kb-input'));
+    const setShown = (on) => root.classList.toggle('kb-shown', on);
     let kb = { base: 0, width: 0, open: false, timer: 0 };
-    document.addEventListener('focusin', (e) => {
-      if (isTypingInput(e.target)) { clearTimeout(kb.timer); kb = { base: vv.height, width: vv.width, open: false, timer: 0 }; }
-    });
-    vv.addEventListener('resize', () => {
+    function checkKeyboard() {
       const input = document.activeElement;
-      if (!isTypingInput(input)) return;
-      if (Math.abs(vv.width - kb.width) > 1) { kb.width = vv.width; kb.base = vv.height; kb.open = false; } // 画面の向きが変わった
-      if (vv.scale > 1.05) return; // 指で拡大している間は判断しない
+      if (!isTypingInput(input) || vv.scale > 1.05) return; // 指で拡大している間は判断しない
+      if (Math.abs(vv.width - kb.width) > 1) { kb.width = vv.width; kb.base = Math.max(window.innerHeight, vv.height); } // 画面の向きが変わった
       kb.base = Math.max(kb.base, vv.height);
       const shrink = kb.base - vv.height;
       clearTimeout(kb.timer);
-      if (shrink > 120) kb.open = true;
+      if (shrink > 120) { kb.open = true; setShown(true); }
       else if (kb.open && shrink < 60) {
         // 一瞬だけの変化（画面の向きを変えている途中など）では終えないよう、少し待ってから確かめる
         kb.timer = setTimeout(() => {
-          if (document.activeElement === input && kb.base - vv.height < 60) { kb.open = false; input.blur(); }
+          if (kb.base - vv.height >= 60) return;
+          kb.open = false;
+          setShown(false);
+          if (document.activeElement === input) input.blur();
         }, 250);
       }
+    }
+    document.addEventListener('focusin', (e) => {
+      if (!isTypingInput(e.target)) return;
+      clearTimeout(kb.timer);
+      kb = { base: Math.max(window.innerHeight, vv.height), width: vv.width, open: false, timer: 0 };
+      checkKeyboard(); // すでにキーボードが出ていたとき
     });
-
-    /* キーボードボタンを、キーボードのすぐ上に保つ
-       キーボードが出ている間は、見えている画面が動くたびに位置を合わせる必要がある。
-       iPhone は「画面が動いた」知らせがスクロール中にまとめて遅れて届くので、知らせを待たずに毎フレーム合わせる。
-       動かすのはボタンの translate だけ（ページ全体の並べ直しは起きない） */
-    const safeProbe = h('div', { 'aria-hidden': 'true', style: 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom);visibility:hidden;pointer-events:none' });
-    document.body.append(safeProbe);
-    let safeBottom = safeProbe.offsetHeight; // iPhone の下のホームバーの余白（キーボードが出るとキーボードが覆う）
-    const lift = () => {
-      const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop); // 画面の下のうち、キーボードで隠れている高さ
-      const v = `${covered > 1 ? Math.max(0, Math.round(covered - safeBottom)) : 0}px`;
-      document.querySelectorAll('.kb-btn').forEach((b) => { if (b.style.getPropertyValue('--kb-lift') !== v) b.style.setProperty('--kb-lift', v); });
-    };
-    let raf = 0;
-    let until = 0;
-    const step = () => {
-      lift();
-      raf = performance.now() < until || isTypingInput(document.activeElement) ? requestAnimationFrame(step) : 0;
-    };
-    const follow = (ms) => { until = Math.max(until, performance.now() + ms); if (!raf) raf = requestAnimationFrame(step); };
-    vv.addEventListener('resize', () => { safeBottom = safeProbe.offsetHeight; follow(800); });
-    vv.addEventListener('scroll', () => follow(800));
-    // 編集している間は毎フレーム。始めたとき・終えたときは、キーボードが出入りし終わるまで少し続ける
-    document.addEventListener('focusin', (e) => { if (isTypingInput(e.target)) follow(1200); });
-    document.addEventListener('focusout', (e) => { if (isTypingInput(e.target)) follow(1200); });
+    document.addEventListener('focusout', (e) => {
+      if (!isTypingInput(e.target)) return;
+      clearTimeout(kb.timer);
+      kb.open = false;
+      setShown(false); // 編集を終えたら（iPhone の「完了」など）、ボタンを戻す
+    });
+    vv.addEventListener('resize', checkKeyboard);
   }
 
   /* ---------- about（別ページ） ---------- */

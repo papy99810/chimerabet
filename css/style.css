@@ -5,7 +5,7 @@
   --font-title: "Avenir Next Condensed", "Myriad Pro", "Arial Narrow", "Roboto Condensed", sans-serif;
   --font-logo: "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", system-ui, sans-serif;
   --font-ui: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
-  /* 画面下に固定するボタンの高さ（キーボードが出ている間のキーボードボタンは、app.js が --kb-lift の分だけ上へずらす） */
+  /* 画面下に固定するボタンの高さ */
   --float-bottom: calc(clamp(16px, 2.6vw, 36px) + env(safe-area-inset-bottom));
 }
 
@@ -427,13 +427,20 @@ html.popup-open { overflow: hidden; }
   position: fixed;
   left: calc(16px + env(safe-area-inset-left));
   bottom: var(--float-bottom);
-  translate: 0 calc(-1 * var(--kb-lift, 0px)); /* キーボードが出ている間は、そのすぐ上へ（ずらすだけなので、ページは並べ直さない） */
   z-index: 50;
   width: 52px;
   padding: 0;
   border: 0;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+  transition: transform .2s ease, box-shadow .2s ease, opacity .25s ease, visibility 0s linear 0s;
+}
+/* 純正のキーボードが出ている間は隠す（app.js が html に kb-shown を付ける。フェードアウト。閉じると戻る） */
+html.kb-shown .mode-btn.kb-btn {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .25s ease, visibility 0s linear .25s;
 }
 .mode-btn.kb-btn[aria-pressed="true"] { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--btn), 0 4px 14px rgba(0, 0, 0, .22); }
 /* 文字の編集：PC はキャラクター以外の場所でマウスのカーソルが文字入力の形になる（クリックで編集）
